@@ -72,9 +72,16 @@ export default function LiveView({ tz = 'UTC' }: { tz?: string }) {
             <Logo className="w-32 h-32 md:w-48 md:h-48 opacity-20" />
           </div>
           {isActualLive && (
-            <h1 className="text-4xl md:text-6xl font-black tracking-[-1px] uppercase text-white mb-6 px-4 leading-none">
-              {activeShowName}
-            </h1>
+            <div className="flex flex-col items-center">
+              {activeShowName.includes(' — ') && (
+                <div className="text-[12px] font-black uppercase tracking-[0.4em] text-accent mb-4">
+                   {activeShowName.split(' — ')[0]}
+                </div>
+              )}
+              <h1 className="text-4xl md:text-6xl font-black tracking-[-1px] uppercase text-white mb-6 px-4 leading-none">
+                {activeShowName.includes(' — ') ? activeShowName.split(' — ')[1] : activeShowName}
+              </h1>
+            </div>
           )}
           {nextShowName && (
             <div className="flex items-center justify-center gap-2 text-[10px] text-[#888a8c] font-bold uppercase tracking-[0.3em] bg-[#5c191c]/20 inline-flex px-6 py-2 border border-accent/20 mx-4">

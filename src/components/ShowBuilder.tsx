@@ -28,7 +28,7 @@ import {
   VolumeX,
   Copy
 } from 'lucide-react';
-import { ShowSegment, SegmentType, RadioShow, AudioTrack } from '../types';
+import { ShowSegment, SegmentType, RadioShow, AudioTrack, Session, ProgramShow } from '../types';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 import JSZip from 'jszip';
 
@@ -62,11 +62,15 @@ export default function ShowBuilder() {
     sessions: [
       { id: 'session1', title: 'DEFAULT_SEQUENCE', segmentIds: ['start', 'welcome'] }
     ],
+    programShows: [],
     createdAt: new Date().toISOString()
   });
 
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
     return localStorage.getItem('non-club-radio-active-session') || 'session1';
+  });
+  const [activeProgramShowId, setActiveProgramShowId] = useState<string>(() => {
+    return localStorage.getItem('non-club-radio-active-program-show') || 'all';
   });
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
   
@@ -112,9 +116,18 @@ export default function ShowBuilder() {
             segmentIds: parsed.segments.map((s: any) => s.id)
           }];
         }
+        if (!parsed.programShows) {
+          parsed.programShows = [];
+        }
         setShow(parsed);
         // Pre-select the session, preferring the one from localStorage if it exists in the loaded show
         const savedSessionId = localStorage.getItem('non-club-radio-active-session');
+        const savedProgramId = localStorage.getItem('non-club-radio-active-program-show');
+        
+        if (savedProgramId) {
+          setActiveProgramShowId(savedProgramId);
+        }
+
         if (savedSessionId && parsed.sessions.some((s: any) => s.id === savedSessionId)) {
           setActiveSessionId(savedSessionId);
         } else {
@@ -587,10 +600,11 @@ export default function ShowBuilder() {
   };
 
   const createSession = () => {
-    const newSession = {
+    const newSession: Session = {
       id: Math.random().toString(36).substr(2, 9),
       title: `New Session ${show.sessions.length + 1}`,
-      segmentIds: []
+      segmentIds: [],
+      showId: activeProgramShowId !== 'all' ? activeProgramShowId : undefined
     };
     setShow(prev => ({
       ...prev,
@@ -598,6 +612,34 @@ export default function ShowBuilder() {
     }));
     setActiveSessionId(newSession.id);
   };
+
+  const addProgramShow = (title: string) => {
+    const newShow: ProgramShow = {
+      id: Math.random().toString(36).substr(2, 9),
+      title,
+      description: 'A recurring program.'
+    };
+    setShow(prev => ({
+      ...prev,
+      programShows: [...(prev.programShows || []), newShow]
+    }));
+    setActiveProgramShowId(newShow.id);
+  };
+
+  const deleteProgramShow = (id: string) => {
+    setShow(prev => ({
+      ...prev,
+      programShows: (prev.programShows || []).filter(s => s.id !== id),
+      // Optionally decouple sessions? Or keep them as is but without showId ref
+      sessions: (prev.sessions || []).map(s => s.showId === id ? { ...s, showId: undefined } : s)
+    }));
+    if (activeProgramShowId === id) setActiveProgramShowId('all');
+  };
+
+  const filteredSessions = (show.sessions || []).filter(s => {
+    if (activeProgramShowId === 'all') return true;
+    return s.showId === activeProgramShowId;
+  });
 
   const activeSession = show.sessions ? show.sessions.find(s => s.id === activeSessionId) : undefined;
   const sessionSegments = activeSession && show.segments
@@ -660,18 +702,74 @@ export default function ShowBuilder() {
             </div>
           </div>
           
-          <div className="flex items-center justify-between p-3 rounded-xl bg-[#2a2d30]/50 border border-border">
-            <div className="flex items-center gap-2 flex-1 relative min-w-0">
+          {/* Show / Series Selector */}
+          <div className="flex flex-col gap-2 py-2">
+            <div className="flex items-center justify-between px-1">
+              <label className="text-[10px] font-black uppercase tracking-[2px] text-accent/80 flex items-center gap-2">
+                <Radio size={12} /> Shows / Series
+              </label>
+              <div className="flex items-center gap-2">
+                {activeProgramShowId !== 'all' && (
+                  <button 
+                    onClick={() => {
+                      if (confirm(`Delete show "${show.programShows?.find(s => s.id === activeProgramShowId)?.title}"?`)) {
+                        deleteProgramShow(activeProgramShowId);
+                      }
+                    }}
+                    className="text-text-secondary hover:text-red-400 transition-colors"
+                    title="Delete Active Show"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+                <button 
+                  onClick={() => {
+                    const title = prompt("Enter new show title:");
+                    if (title) addProgramShow(title);
+                  }}
+                  className="text-text-secondary hover:text-white transition-colors"
+                  title="Add New Show"
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
+            </div>
+            <div className="relative">
               <select 
-                value={activeSessionId}
-                onChange={e => setActiveSessionId(e.target.value)}
-                className="bg-accent/10 border-none text-[#f2e7d5] text-xs font-black uppercase tracking-wider rounded-lg px-3 py-2 outline-none appearance-none cursor-pointer max-w-[140px] truncate"
+                value={activeProgramShowId}
+                onChange={e => {
+                  const val = e.target.value;
+                  setActiveProgramShowId(val);
+                  localStorage.setItem('non-club-radio-active-program-show', val);
+                  // Auto-select first session in that show if currently active session isn't in it
+                  const firstInShow = show.sessions.find(s => val === 'all' || s.showId === val);
+                  if (firstInShow) setActiveSessionId(firstInShow.id);
+                }}
+                className="w-full bg-[#1e2022] border border-border text-[#f2e7d5] text-[10px] font-black uppercase tracking-wider rounded-lg px-3 py-2.5 outline-none appearance-none cursor-pointer hover:border-white/20 transition-colors"
               >
-                {(show.sessions || []).map(s => (
-                  <option key={s.id} value={s.id} className="bg-[#1e2022] text-white">{s.title}</option>
+                <option value="all" className="bg-[#1e2022] text-white">All Episodes (Unfiltered)</option>
+                {(show.programShows || []).map(ps => (
+                  <option key={ps.id} value={ps.id} className="bg-[#1e2022] text-white">{ps.title}</option>
                 ))}
               </select>
-              <ChevronDown size={12} className="absolute left-[120px] text-accent pointer-events-none" />
+              <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
+            </div>
+          </div>
+
+          <div className="flex bg-[#2a2d30]/50 border border-border rounded-xl p-1.5 px-3">
+            <div className="flex items-center gap-2 flex-1 relative min-w-0">
+              <div className="relative flex items-center min-w-0">
+                <select 
+                  value={activeSessionId}
+                  onChange={e => setActiveSessionId(e.target.value)}
+                  className="bg-accent/10 border-none text-[#f2e7d5] text-[10px] font-black uppercase tracking-wider rounded-lg pl-3 pr-8 py-2 outline-none appearance-none cursor-pointer max-w-[140px] truncate"
+                >
+                  {filteredSessions.map(s => (
+                    <option key={s.id} value={s.id} className="bg-[#1e2022] text-white">{s.title}</option>
+                  ))}
+                </select>
+                <ChevronDown size={12} className="absolute right-2 text-accent pointer-events-none" />
+              </div>
               
               {activeSession && (
                 <input

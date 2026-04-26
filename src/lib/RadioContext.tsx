@@ -127,6 +127,8 @@ interface RadioContextProps {
   queueLength: number;
   currentIndex: number;
   allMixes: ShowSegment[];
+  allSchedules: MonthlySchedule[];
+  radioShow: RadioShow | null;
 }
 
 const RadioContext = createContext<RadioContextProps | null>(null);
@@ -136,6 +138,8 @@ export function RadioProvider({ children, tz = 'UTC' }: { children: React.ReactN
   const [activeSession, setActiveSession] = useState<{title: string; segments: ShowSegment[]} | null>(null);
   const [activeEvent, setActiveEvent] = useState<ScheduleEntry | null>(null);
   const [allMixes, setAllMixes] = useState<ShowSegment[]>([]);
+  const [allSchedules, setAllSchedules] = useState<MonthlySchedule[]>([]);
+  const [radioShow, setRadioShow] = useState<RadioShow | null>(null);
   const [activeShowName, setActiveShowName] = useState<string>("OFFLINE_STANDBY");
   const [activeEventStartTime, setActiveEventStartTime] = useState<number | null>(null);
   const [nextShowName, setNextShowName] = useState<string | null>(null);
@@ -196,6 +200,9 @@ export function RadioProvider({ children, tz = 'UTC' }: { children: React.ReactN
 
         const schedules = JSON.parse(schedulesStr) as MonthlySchedule[];
         const draft = JSON.parse(draftStr) as RadioShow;
+
+        setAllSchedules(schedules);
+        setRadioShow(draft);
 
         // Populate all mixes
         if (draft.segments) {
@@ -682,7 +689,7 @@ export function RadioProvider({ children, tz = 'UTC' }: { children: React.ReactN
       sessionProgress, sessionDuration, isStudioMode,
       togglePlayPause, skipForward, handleVolumeChange,
       queueLength: queueRef.current.length, currentIndex: currentIndexRef.current,
-      allMixes
+      allMixes, allSchedules, radioShow
     }}>
       {children}
     </RadioContext.Provider>

@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { useRadio } from '../lib/RadioContext';
-import { Play, Pause, Calendar as CalendarIcon } from 'lucide-react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { useRadio, computeDailySchedule } from '../lib/RadioContext';
+import { Play, Pause, Calendar as CalendarIcon, ChevronLeft, ChevronRight } from 'lucide-react';
 import Logo from './Logo';
 
 interface LandingPageProps {
@@ -12,7 +12,26 @@ interface LandingPageProps {
 export default function LandingPage({ onLogin, onListen, isUserAuthenticated }: LandingPageProps) {
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { activeEvent, allMixes, isPlaying, togglePlayPause, activeSession } = useRadio();
+  const { activeEvent, allMixes, isPlaying, togglePlayPause, activeSession, allSchedules, radioShow, currentTime } = useRadio();
+  const [selectedDay, setSelectedDay] = useState(new Date().getDay());
+  const [viewMode, setViewMode] = useState<'timeline' | 'series'>('timeline');
+  const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(null);
+
+  const daySchedule = useMemo(() => {
+    if (!allSchedules || allSchedules.length === 0 || !radioShow) return [];
+    
+    const targetDate = new Date(currentTime);
+    const currentDay = targetDate.getDay();
+    let diff = selectedDay - currentDay;
+    targetDate.setDate(targetDate.getDate() + diff);
+    
+    const year = targetDate.getFullYear();
+    const month = targetDate.getMonth();
+    const monthData = allSchedules.find(s => s.year === year && s.monthIndex === month);
+    
+    if (!monthData) return [];
+    return computeDailySchedule(monthData.entries, targetDate, radioShow);
+  }, [allSchedules, radioShow, selectedDay, currentTime]);
 
   useEffect(() => {
     const scrollContainer = document.querySelector('.main-scroll-container');
@@ -126,7 +145,7 @@ export default function LandingPage({ onLogin, onListen, isUserAuthenticated }: 
           nav-links fixed md:relative top-full md:top-0 left-0 right-0 md:bg-transparent md:flex md:flex-row items-center gap-8 md:gap-12 p-8 md:p-0 transition-all duration-400 z-[2] font-mono
           ${mobileMenuOpen ? 'flex flex-col bg-[#1e2022]/98 border-b border-white/5' : 'hidden md:flex'}
         `}>
-          {['About', 'Academy', 'Vinyl', 'Contact'].map(item => (
+          {['About', 'Schedule', 'Vinyl', 'Contact'].map(item => (
             <li key={item}>
               <a 
                 href={`#${item.toLowerCase()}`} 
@@ -176,7 +195,7 @@ export default function LandingPage({ onLogin, onListen, isUserAuthenticated }: 
         </div>
 
         <p className="mt-12 text-[12px] text-[#666666] uppercase font-bold tracking-[0.4em] max-w-[600px] leading-relaxed animate-fade-up delay-300 relative z-[1]">
-          Vinyl Store — DJ Academy — Curated Soundscapes — Studio Exports
+          Vinyl Store — DJ Studio — Curated Soundscapes — Studio Exports
         </p>
 
         <div className="mt-16 flex gap-6 flex-wrap justify-center animate-fade-up delay-450 relative z-[1]">
@@ -191,11 +210,14 @@ export default function LandingPage({ onLogin, onListen, isUserAuthenticated }: 
             {isPlaying ? 'Disconnect' : 'Connect Broadcast'}
           </button>
           <button 
-            onClick={onListen}
+            onClick={() => {
+              const el = document.getElementById('schedule');
+              if (el) el.scrollIntoView({ behavior: 'smooth' });
+            }}
             className="px-12 py-5 bg-transparent text-white border border-white/20 font-bold tracking-[0.2em] uppercase text-[11px] rounded-sm hover:border-white transition-all flex items-center gap-3"
           >
             <CalendarIcon size={14} />
-            Academy Schedule
+            Radio Schedule
           </button>
         </div>
 
@@ -219,35 +241,235 @@ export default function LandingPage({ onLogin, onListen, isUserAuthenticated }: 
         </div>
       </section>
 
-      {/* ABOUT */}
-      <section id="about" className="py-40 px-6 md:px-16 bg-[#1e2022] relative z-[1] border-t border-white/5">
-        <div className="max-w-[1200px] mx-auto grid grid-cols-1 md:grid-cols-2 gap-16 md:gap-32 items-start">
-          <div className="reveal">
-            <h2 className="font-extrabold text-5xl md:text-7xl text-[#f2e7d5] mb-8 tracking-tighter uppercase leading-none">The Academy</h2>
-            <p className="text-[#888a8c] text-sm leading-relaxed mb-8 uppercase font-bold tracking-widest">
-              Professional Vinyl DJ Training & Creative Development.
-            </p>
-            <div className="space-y-6 text-[#888a8c]/80 leading-relaxed text-[13px] uppercase font-bold tracking-widest">
-              <p>Non-Club Radio is a collective dedicated to the preservation and advancement of vinyl culture. Our academy provides structured learning for aspiring and established artists.</p>
-              <p>We bridge the gap between technical mastery and creative expression through hands-on analog training.</p>
-            </div>
-            <div className="mt-12 flex gap-4">
-              <button className="px-8 py-4 bg-accent text-[#f2e7d5] text-[10px] font-bold tracking-[0.2em] uppercase rounded-sm hover:bg-[#8e1d22] transition-all">Enroll Now</button>
-              <button className="px-8 py-4 border border-white/10 text-white text-[10px] font-bold tracking-[0.2em] uppercase rounded-sm hover:border-white transition-all">Prospectus</button>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-px bg-white/5 border border-white/10 reveal">
-            {[
-              { num: '01', label: 'Vinyl Technique' },
-              { num: '02', label: 'Sound Curation' },
-              { num: '03', label: 'Studio Practice' },
-              { num: '04', label: 'Artist Branding' }
-            ].map(stat => (
-              <div key={stat.label} className="bg-[#1e2022] p-12 text-left group hover:bg-[#f2e7d5] transition-all duration-300">
-                <div className="text-3xl text-[#f2e7d5] group-hover:text-black font-bold tracking-tight mb-4">{stat.num}.</div>
-                <div className="text-[10px] text-[#888a8c] group-hover:text-black uppercase tracking-[0.2em] font-bold">{stat.label}</div>
+      {/* SCHEDULE */}
+      <section id="schedule" className="py-24 px-6 md:px-16 bg-[#1e2022] relative z-[1] border-t border-white/5">
+        <div className="max-w-[1400px] mx-auto flex flex-col gap-12">
+          
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-8 pb-12 border-b border-white/10 reveal">
+            <div>
+              <h2 className="font-extrabold text-5xl md:text-8xl text-[#f2e7d5] tracking-tighter uppercase leading-none mb-4">Radio Schedule</h2>
+              <div className="flex gap-8 mt-6">
+                <button 
+                  onClick={() => setViewMode('timeline')}
+                  className={`text-[10px] font-black uppercase tracking-[0.3em] transition-all pb-2 border-b-2 ${viewMode === 'timeline' ? 'border-accent text-white' : 'border-transparent text-white/30 hover:text-white'}`}
+                >
+                  Timeline
+                </button>
+                <button 
+                  onClick={() => {
+                    setViewMode('series');
+                    setSelectedSeriesId(null);
+                  }}
+                  className={`text-[10px] font-black uppercase tracking-[0.3em] transition-all pb-2 border-b-2 ${viewMode === 'series' ? 'border-accent text-white' : 'border-transparent text-white/30 hover:text-white'}`}
+                >
+                  Series
+                </button>
               </div>
-            ))}
+            </div>
+            <button 
+              onClick={onListen}
+              className="px-10 py-5 bg-[#FFB800] text-black text-[12px] font-black tracking-[0.2em] uppercase rounded-sm hover:bg-white transition-all shadow-[0_0_30px_rgba(255,184,0,0.2)] active:scale-95"
+            >
+              Jump to On Air Now
+            </button>
+          </div>
+
+          <div className="reveal border border-white/10 bg-[#1e2022]">
+            {viewMode === 'timeline' ? (
+              <>
+                {/* Day Selector */}
+                <div className="flex items-stretch border-b border-white/10 bg-[#2a2d30]/30 overflow-x-auto no-scrollbar">
+                  <button 
+                    onClick={() => setSelectedDay(prev => (prev - 1 + 7) % 7)}
+                    className="px-6 py-6 border-r border-white/10 text-white/40 hover:text-white transition-all bg-[#2a2d30]/20"
+                  >
+                    <ChevronLeft size={24} />
+                  </button>
+                  
+                  {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day, i) => (
+                    <button 
+                      key={day}
+                      onClick={() => setSelectedDay(i)}
+                      className={`flex-1 min-w-[140px] py-8 px-6 text-[10px] font-black uppercase tracking-[0.3em] transition-all border-r border-white/10 last:border-r-0
+                        ${selectedDay === i ? 'bg-white/5 text-white' : 'text-white/30 hover:text-white hover:bg-white/[0.02]'}
+                      `}
+                    >
+                      {day}
+                    </button>
+                  ))}
+
+                  <button 
+                    onClick={() => setSelectedDay(prev => (prev + 1) % 7)}
+                    className="px-6 py-6 border-l border-white/10 text-white/40 hover:text-white transition-all bg-[#2a2d30]/20"
+                  >
+                    <ChevronRight size={24} />
+                  </button>
+                </div>
+
+                {/* List */}
+                <div className="divide-y divide-white/10">
+                  {daySchedule.length > 0 ? daySchedule.map((item, idx) => {
+                    const session = radioShow?.sessions.find(s => item.sessionId ? s.id === item.sessionId : s.title === item.show);
+                    const firstSegId = session?.segmentIds[0];
+                    const segment = radioShow?.segments.find(s => s.id === firstSegId);
+                    const thumbnail = segment?.thumbnail;
+
+                    return (
+                      <div key={`${item.id}-${idx}`} className="flex flex-col md:flex-row items-stretch group hover:bg-white/[0.02] transition-colors">
+                        <div className="md:w-40 p-8 border-r border-white/10 flex flex-col items-center justify-start gap-4">
+                          <span className="text-[12px] font-mono text-[#888a8c] tabular-nums tracking-widest">{item.time} GMT</span>
+                          <div className="w-px h-12 bg-white/10 group-hover:bg-accent/40 transition-colors"></div>
+                        </div>
+                        
+                        <div className="flex-1 p-8 flex flex-col md:flex-row gap-10 items-start">
+                          <div className="w-56 h-36 bg-[#2a2d30] border border-white/10 rounded-sm overflow-hidden relative shrink-0 group-hover:border-accent/30 transition-all shadow-xl">
+                            {thumbnail ? (
+                              <img src={thumbnail} className="w-full h-full object-cover grayscale opacity-60 group-hover:opacity-100 group-hover:grayscale-0 transition-all duration-700" alt={item.show} />
+                            ) : (
+                              <div className="w-full h-full p-6 flex flex-col items-center justify-center opacity-20 group-hover:opacity-40 transition-all">
+                                 <Logo className="w-16 h-16 mb-2" />
+                                 <div className="text-[8px] font-black tracking-widest uppercase opacity-40">NR-ST / SCHED</div>
+                              </div>
+                            )}
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                          </div>
+
+                          <div className="flex-1 pt-2">
+                            {item.show.includes(' — ') && (
+                              <div className="text-[10px] font-black uppercase tracking-[0.3em] text-accent mb-2">
+                                 {item.show.split(' — ')[0]}
+                              </div>
+                            )}
+                            <h3 className="text-2xl md:text-4xl font-extrabold text-[#f2e7d5] uppercase tracking-tighter mb-4 group-hover:text-accent transition-all cursor-pointer inline-block border-b border-transparent hover:border-accent">
+                              {item.show.includes(' — ') ? item.show.split(' — ')[1] : item.show}
+                            </h3>
+                            <p className="text-xs text-[#888a8c] uppercase font-bold tracking-[0.2em] leading-relaxed max-w-2xl mb-6">
+                              {item.focus || "Daily curated soundscapes and analog explorations from the Non-Club studio."}
+                            </p>
+                            
+                            <div className="flex items-center gap-3">
+                              <span className="text-[9px] text-white/20 uppercase tracking-[0.3em] font-black">Supported By</span>
+                              <div className="flex items-center gap-2 px-2 py-1 bg-white/5 border border-white/5 rounded-sm">
+                                 <div className="w-3 h-3 border border-white/20 flex items-center justify-center">
+                                   <div className="w-1 h-1 bg-white/40"></div>
+                                 </div>
+                                 <span className="text-[9px] text-[#f2e7d5]/60 uppercase tracking-[0.3em] font-black">Non-Club Radio Collective</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }) : (
+                    <div className="p-32 text-center">
+                       <p className="text-xs text-[#888a8c] uppercase font-bold tracking-[0.4em] animate-pulse">No programming scheduled for this rotation.</p>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="p-8">
+                {!selectedSeriesId ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    {radioShow?.programShows && radioShow.programShows.length > 0 ? (
+                      radioShow.programShows.map(series => {
+                        const episodes = radioShow.sessions.filter(s => s.showId === series.id);
+                        return (
+                          <div 
+                            key={series.id}
+                            onClick={() => setSelectedSeriesId(series.id)}
+                            className="group cursor-pointer bg-[#2a2d30]/30 border border-white/5 p-8 hover:bg-white/[0.03] hover:border-white/10 transition-all"
+                          >
+                            <div className="w-full aspect-video bg-[#1e2022] border border-white/5 mb-6 overflow-hidden relative">
+                              {series.thumbnail ? (
+                                <img src={series.thumbnail} className="w-full h-full object-cover grayscale opacity-40 group-hover:opacity-100 group-hover:grayscale-0 transition-all duration-700" alt={series.title} />
+                              ) : (
+                                <div className="w-full h-full flex flex-col items-center justify-center opacity-10">
+                                   <Logo className="w-16 h-16" />
+                                </div>
+                              )}
+                              <div className="absolute top-4 left-4 px-3 py-1 bg-accent/20 border border-accent/30 text-accent text-[8px] font-black uppercase tracking-widest">
+                                {episodes.length} EPISODES
+                              </div>
+                            </div>
+                            <h3 className="text-xl font-bold text-[#f2e7d5] uppercase tracking-tight mb-2 group-hover:text-accent transition-colors">{series.title}</h3>
+                            <p className="text-[10px] text-[#888a8c] uppercase font-bold tracking-widest leading-relaxed line-clamp-2">
+                              {series.description || "Recurring series and specialized programming from the Non-Club audio lab."}
+                            </p>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="col-span-full py-20 text-center">
+                         <p className="text-xs text-[#888a8c] uppercase font-bold tracking-[0.4em]">No series library established yet.</p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <button 
+                      onClick={() => setSelectedSeriesId(null)}
+                      className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-[#888a8c] hover:text-white mb-12 transition-colors group"
+                    >
+                      <ChevronLeft size={16} className="group-hover:-translate-x-1 transition-transform" /> Back to Series
+                    </button>
+                    
+                    {(() => {
+                      const series = radioShow?.programShows?.find(s => s.id === selectedSeriesId);
+                      const episodes = radioShow?.sessions.filter(s => s.showId === selectedSeriesId) || [];
+                      
+                      return (
+                        <div className="flex flex-col gap-12">
+                          <div className="flex flex-col md:flex-row gap-12 items-start">
+                             <div className="w-full md:w-80 aspect-square bg-[#2a2d30] border border-white/10 rounded-sm overflow-hidden shrink-0">
+                                {series?.thumbnail ? <img src={series.thumbnail} className="w-full h-full object-cover grayscale opacity-60" alt={series.title} /> : <div className="w-full h-full p-12 opacity-10"><Logo /></div>}
+                             </div>
+                             <div className="flex-1">
+                                <h1 className="text-4xl md:text-6xl font-extrabold text-[#f2e7d5] uppercase tracking-tighter mb-6">{series?.title}</h1>
+                                <p className="text-sm text-[#888a8c] uppercase font-bold tracking-widest leading-relaxed max-w-2xl mb-8">
+                                  {series?.description}
+                                </p>
+                                <div className="flex items-center gap-4 py-6 border-y border-white/5">
+                                   <div className="text-[10px] text-white/40 uppercase font-black tracking-widest">NR-ST / CAT:00{radioShow?.programShows?.indexOf(series!) || 0}</div>
+                                   <div className="w-1 h-1 bg-accent rounded-full"></div>
+                                   <div className="text-[10px] text-white/40 uppercase font-black tracking-widest">{episodes.length} Recorded Episodes</div>
+                                </div>
+                             </div>
+                          </div>
+
+                          <div className="mt-12 divide-y divide-white/10 border border-white/10">
+                            {episodes.map((ep, i) => {
+                              const firstSeg = radioShow?.segments.find(s => s.id === ep.segmentIds[0]);
+                              return (
+                                <div key={ep.id} className="p-8 flex flex-col md:flex-row justify-between items-center group hover:bg-white/[0.02] transition-colors">
+                                   <div className="flex flex-col md:flex-row items-center gap-10 flex-1">
+                                      <div className="w-12 h-12 bg-white/5 text-[10px] font-black flex items-center justify-center text-[#888a8c] tabular-nums">
+                                        {(i + 1).toString().padStart(2, '0')}
+                                      </div>
+                                      <div>
+                                         <h4 className="text-xl font-bold text-[#f2e7d5] uppercase tracking-tight mb-1 group-hover:text-accent transition-colors">{ep.title}</h4>
+                                         <div className="text-[9px] text-[#888a8c] uppercase font-bold tracking-widest">
+                                           Recorded at Non-Club ST • {firstSeg?.duration ? `${Math.floor(firstSeg.duration / 60)} MINS` : 'DURATION VARIES'}
+                                         </div>
+                                      </div>
+                                   </div>
+                                   <button 
+                                      onClick={onListen}
+                                      className="mt-6 md:mt-0 px-6 py-3 bg-white/5 border border-white/10 text-white text-[9px] font-black uppercase tracking-widest hover:bg-accent hover:border-accent hover:text-white transition-all flex items-center gap-2"
+                                   >
+                                      Tune In
+                                   </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -374,7 +596,7 @@ export default function LandingPage({ onLogin, onListen, isUserAuthenticated }: 
         </div>
         <div className="text-[40px] font-extrabold tracking-[0.4em] text-[#f2e7d5] mb-4 uppercase leading-none opacity-20 text-glow">NON-CLUB RADIO</div>
         <div className="flex gap-12 justify-center flex-wrap mb-16 font-mono">
-          {['About', 'Academy', 'Vinyl', 'Contact'].map(link => (
+          {['About', 'Schedule', 'Vinyl', 'Contact'].map(link => (
             <a key={link} href={`#${link.toLowerCase()}`} className="text-[9px] text-[#888a8c] tracking-[0.3em] uppercase font-bold hover:text-[#f2e7d5] transition-all">
               {link}
             </a>

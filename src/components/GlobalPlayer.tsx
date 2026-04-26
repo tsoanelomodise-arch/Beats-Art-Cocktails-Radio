@@ -65,10 +65,10 @@ export default function GlobalPlayer() {
               {nowPlayingTrack ? (
                 <>
                   <div className="text-[9px] font-black uppercase tracking-[3px] flex items-center gap-2 mb-1 text-accent">
-                    <RadioReceiver size={10} /> {isStudioMode ? 'STUDIO_PREVIEW' : activeShowName}
+                    <RadioReceiver size={10} /> {isStudioMode ? 'STUDIO_PREVIEW' : (activeShowName.includes(' — ') ? activeShowName.split(' — ')[0] : activeShowName)}
                   </div>
                   <div className="text-sm font-bold truncate text-[#f2e7d5] uppercase tracking-tight">
-                    {nowPlayingTrack.name}
+                    {nowPlayingTrack.name || (activeShowName.includes(' — ') ? activeShowName.split(' — ')[1] : 'Audio Track')}
                   </div>
                 </>
               ) : activeSession ? (

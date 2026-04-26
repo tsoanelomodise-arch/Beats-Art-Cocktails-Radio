@@ -186,7 +186,7 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
   const [isTypingShowTitle, setIsTypingShowTitle] = useState(false);
   const [editingYear, setEditingYear] = useState<number>(() => getCurrentTimeInTimezone(tz).getFullYear());
   const [editingMonth, setEditingMonth] = useState<number>(() => getCurrentTimeInTimezone(tz).getMonth());
-  const [studioSessions, setStudioSessions] = useState<{id: string, title: string}[]>([]);
+  const [studioSessions, setStudioSessions] = useState<{id: string, title: string, programName?: string}[]>([]);
   const [fullShowData, setFullShowData] = useState<RadioShow | null>(null);
 
   const openEditModal = (entry: ScheduleEntry) => {
@@ -231,7 +231,14 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
         const parsed = JSON.parse(draft) as RadioShow;
         setFullShowData(parsed);
         if (parsed?.sessions) {
-          setStudioSessions(parsed.sessions.map((s: any) => ({ id: s.id, title: s.title || 'Untitled Session' })));
+          setStudioSessions(parsed.sessions.map((s: any) => {
+            const programShow = parsed.programShows?.find(ps => ps.id === s.showId);
+            return { 
+              id: s.id, 
+              title: programShow ? `${programShow.title} — ${s.title}` : s.title || 'Untitled Session',
+              programName: programShow?.title
+            };
+          }));
         }
       }
     } catch (err) {
@@ -966,50 +973,57 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
                     </button>
                   </div>
                   
-                  <div className="flex bg-[#1a1c26] border border-white/5 rounded-xl p-4 text-white outline-none focus-within:border-accent transition-all font-bold group">
-                    {isTypingShowTitle ? (
-                      <input 
-                        type="text"
-                        className="flex-1 bg-transparent outline-none"
-                        placeholder="Enter show title..."
-                        value={editingShow.show}
-                        onChange={e => {
-                          const title = e.target.value;
-                          const { duration, sessionId } = getDerivedDataForShow(title);
-                          setEditingShow({...editingShow, show: title, duration, sessionId});
-                        }}
-                      />
-                    ) : (
-                      <select 
-                        className="flex-1 bg-transparent outline-none appearance-none" 
-                        value={editingShow.show} 
-                        onChange={e => {
-                          const title = e.target.value;
-                          const { duration, sessionId } = getDerivedDataForShow(title);
-                          setEditingShow({...editingShow, show: title, duration, sessionId});
-                        }}
-                      >
-                        <option value="" disabled>Select a Show from Studio...</option>
-                        {editingShow.show && !studioSessions.some(s => s.title === editingShow.show) && (
-                          <option value={editingShow.show}>{editingShow.show} (Custom)</option>
-                        )}
-                        {studioSessions.map((session) => (
-                          <option key={session.id} value={session.title}>{session.title}</option>
-                        ))}
-                      </select>
+              <div className="flex bg-[#1a1c26] border border-white/5 rounded-xl p-4 text-white outline-none focus-within:border-accent transition-all font-bold group relative">
+                {isTypingShowTitle ? (
+                  <input 
+                    type="text"
+                    className="flex-1 bg-transparent outline-none text-white w-full"
+                    placeholder="Enter show title..."
+                    value={editingShow.show}
+                    onChange={e => {
+                      const title = e.target.value;
+                      const { duration, sessionId } = getDerivedDataForShow(title);
+                      setEditingShow({...editingShow, show: title, duration, sessionId});
+                    }}
+                  />
+                ) : (
+                  <select 
+                    className="flex-1 bg-transparent outline-none appearance-none text-white w-full cursor-pointer pr-8" 
+                    value={editingShow.show} 
+                    onChange={e => {
+                      const title = e.target.value;
+                      const { duration, sessionId } = getDerivedDataForShow(title);
+                      setEditingShow({...editingShow, show: title, duration, sessionId});
+                    }}
+                  >
+                    <option value="" disabled className="bg-[#1e2022] text-white/50">Select a Show from Studio...</option>
+                    {editingShow.show && !studioSessions.some(s => s.title === editingShow.show) && (
+                      <option value={editingShow.show} className="bg-[#1e2022] text-white">{editingShow.show} (Custom)</option>
                     )}
-                    {!isTypingShowTitle && <ChevronDown size={16} className="text-text-secondary pointer-events-none self-center" />}
-                  </div>
+                    {studioSessions.map((session) => (
+                      <option key={session.id} value={session.title} className="bg-[#1e2022] text-white">{session.title}</option>
+                    ))}
+                  </select>
+                )}
+                {!isTypingShowTitle && <ChevronDown size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none" />}
+              </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-[11px] font-black uppercase tracking-widest text-[#8e95ab]">Category</label>
-                  <select className="w-full bg-[#1a1c26] border border-white/5 rounded-xl p-4 text-white outline-none focus:border-accent transition-all font-bold appearance-none px-4" value={editingShow.category || 'talk'} onChange={e => setEditingShow({...editingShow, category: e.target.value as any})}>
-                    <option value="news">News & Updates</option>
-                    <option value="business">Business & Tech</option>
-                    <option value="music">Music & DJ Sets</option>
-                    <option value="talk">Talk & Podcast</option>
-                    <option value="creative">Creative Arts</option>
-                  </select>
+                  <div className="relative">
+                    <select 
+                      className="w-full bg-[#1a1c26] border border-white/5 rounded-xl p-4 text-white outline-none focus:border-accent transition-all font-bold appearance-none px-4 pr-10 cursor-pointer" 
+                      value={editingShow.category || 'talk'} 
+                      onChange={e => setEditingShow({...editingShow, category: e.target.value as any})}
+                    >
+                      <option value="news" className="bg-[#1e2022] text-white">News & Updates</option>
+                      <option value="business" className="bg-[#1e2022] text-white">Business & Tech</option>
+                      <option value="music" className="bg-[#1e2022] text-white">Music & DJ Sets</option>
+                      <option value="talk" className="bg-[#1e2022] text-white">Talk & Podcast</option>
+                      <option value="creative" className="bg-[#1e2022] text-white">Creative Arts</option>
+                    </select>
+                    <ChevronDown size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none" />
+                  </div>
                 </div>
               </div>
 
@@ -1056,13 +1070,13 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
                     <div className="space-y-1.5">
                       <div className="relative">
                         <select 
-                          className="w-full bg-[#1a1c26] border border-white/5 rounded-xl p-4 text-white outline-none focus:border-accent transition-all font-bold appearance-none px-4"
+                          className="w-full bg-[#1a1c26] border border-white/5 rounded-xl p-4 text-white outline-none focus-border-accent transition-all font-bold appearance-none px-4 pr-10 cursor-pointer"
                           value={editingShow.followsShowTitle || ''}
                           onChange={e => setEditingShow({...editingShow, followsShowTitle: e.target.value})}
                         >
-                          <option value="">Chronological Flow</option>
+                          <option value="" className="bg-[#1e2022] text-white/50">Chronological Flow</option>
                           {availableFollowTitles.filter(title => title !== editingShow.show).map(title => (
-                            <option key={title} value={title}>{title}</option>
+                            <option key={title} value={title} className="bg-[#1e2022] text-white">{title}</option>
                           ))}
                         </select>
                         <ChevronDown size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none" />

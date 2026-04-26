@@ -23,6 +23,16 @@
     -moz-osx-font-smoothing: grayscale;
     scroll-behavior: smooth;
     letter-spacing: 0.05em;
+    color-scheme: dark;
+  }
+
+  /* Global Select & Option Reset for Dark Theme */
+  select {
+    @apply cursor-pointer;
+  }
+
+  select option {
+    @apply bg-[#1e2022] text-white;
   }
 
   /* Custom Sleek Scrollbar */

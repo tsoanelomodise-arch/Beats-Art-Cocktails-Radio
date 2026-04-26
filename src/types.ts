@@ -47,6 +47,15 @@ export interface Session {
   id: string;
   title: string;
   segmentIds: string[];
+  showId?: string;
+  airDate?: string;
+}
+
+export interface ProgramShow {
+  id: string;
+  title: string;
+  description: string;
+  thumbnail?: string;
 }
 
 export interface RadioShow {
@@ -55,6 +64,7 @@ export interface RadioShow {
   description: string;
   segments: ShowSegment[];
   sessions: Session[];
+  programShows?: ProgramShow[];
   createdAt: string;
 }
 
