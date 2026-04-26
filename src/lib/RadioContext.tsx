@@ -1,13 +1,15 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { db } from './firebase';
 import { getAudioFile } from './storage';
 import { RadioShow, ScheduleEntry, MonthlySchedule, ShowSegment, AudioTrack } from '../types';
 import { getCurrentTimeInTimezone, getStationTimezone } from './timezone';
 
-export function getMinutesFromMidnight(d: Date) {
-  return d.getHours() * 60 + d.getMinutes();
+export function getSecondsFromMidnight(d: Date) {
+  return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
 }
 
-export function computeDailySchedule(entries: ScheduleEntry[], date: Date): ScheduleEntry[] {
+export function computeDailySchedule(entries: ScheduleEntry[], date: Date, draft?: RadioShow): ScheduleEntry[] {
   const dayOfWeek = date.getDay();
   const localDateString = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
@@ -17,44 +19,95 @@ export function computeDailySchedule(entries: ScheduleEntry[], date: Date): Sche
     return false;
   });
 
-  const computed: ScheduleEntry[] = [];
-  let currentEnd = 0;
-  
-  // Sort entries: fixed times first (sorted by time), then auto-follow entries
-  const sorted = [...filtered].sort((a, b) => {
-    const aFixed = a.startTime != null && !isNaN(a.startTime);
-    const bFixed = b.startTime != null && !isNaN(b.startTime);
-    if (aFixed && bFixed) return (a.startTime as number) - (b.startTime as number);
-    if (aFixed) return -1;
-    if (bFixed) return 1;
-    return 0;
-  });
+  if (filtered.length === 0) return [];
 
-  for (const e of sorted) {
-     if (e.startTime !== undefined && e.startTime !== null && !isNaN(e.startTime)) {
-        computed.push(e as ScheduleEntry);
-        currentEnd = (e.startTime as number) + (e.duration || 0);
-     } else {
-        let start = currentEnd;
-        if (e.followsShowTitle) {
-           const predecessor = computed.find(c => c.show === e.followsShowTitle);
-           if (predecessor && predecessor.startTime != null) {
-              start = (predecessor.startTime as number) + predecessor.duration;
-           }
+  const getSessionDurationSecs = (showTitle: string, sessId?: string): number => {
+    if (!draft || !draft.segments || !draft.sessions) return 3600; 
+    const session = draft.sessions.find(s => sessId ? s.id === sessId : s.title === showTitle);
+    if (!session) return 3600;
+    
+    let totalDuration = 0;
+    for (const sid of session.segmentIds) {
+      const seg = draft.segments.find(s => s.id === sid);
+      if (seg) {
+        if (seg.duration) {
+          totalDuration += seg.duration;
+        } else if (seg.audioSequence && seg.audioSequence.length > 0) {
+          totalDuration += seg.audioSequence.reduce((acc, t) => acc + (t.duration || 0), 0);
+        } else {
+          totalDuration += 180; // Default 3 min
         }
-        computed.push({ ...e, startTime: start } as ScheduleEntry);
-        // We update currentEnd for the NEXT item in the list, 
-        // but only if we are just flowing normally.
-        currentEnd = start + (e.duration || 0);
+      }
+    }
+    return totalDuration > 0 ? totalDuration : 3600;
+  };
+
+  const entriesWithDuration = filtered.map(e => ({
+     ...e,
+     durationSecs: getSessionDurationSecs(e.show, e.sessionId),
+     startTimeSecs: undefined as number | undefined
+  }));
+
+  // Resolve start times iteratively
+  let changed = true;
+  let iterations = 0;
+  const maxIterations = entriesWithDuration.length * 2;
+
+  while (changed && iterations < maxIterations) {
+     changed = false;
+     iterations++;
+     
+     for (let i = 0; i < entriesWithDuration.length; i++) {
+        const e = entriesWithDuration[i];
+        if (e.startTimeSecs !== undefined) continue;
+
+        // 1. Fixed time?
+        if (e.startTime != null && !isNaN(e.startTime)) {
+           e.startTimeSecs = (e.startTime as number) * 60;
+           changed = true;
+           continue;
+        }
+
+        // 2. Explicit follower?
+        if (e.followsShowTitle) {
+           // Find the show it follows
+           const pred = entriesWithDuration.find(p => p.show === e.followsShowTitle && p.startTimeSecs !== undefined && p.id !== e.id);
+           if (pred) {
+              e.startTimeSecs = pred.startTimeSecs + pred.durationSecs;
+              changed = true;
+           }
+           continue;
+        }
+
+        // 3. Natural follower?
+        if (i > 0) {
+           const pred = entriesWithDuration[i-1];
+           if (pred.startTimeSecs !== undefined) {
+              e.startTimeSecs = pred.startTimeSecs + pred.durationSecs;
+              changed = true;
+           }
+        } else {
+           // First show starts at midnight
+           e.startTimeSecs = 0;
+           changed = true;
+        }
      }
   }
 
-  return computed.sort((a, b) => (a.startTime as number) - (b.startTime as number));
+  return entriesWithDuration
+    .filter(e => e.startTimeSecs !== undefined)
+    .map(e => ({
+       ...e,
+       startTime: e.startTimeSecs! / 60,
+       duration: e.durationSecs! / 60
+    }))
+    .sort((a, b) => a.startTimeSecs! - b.startTimeSecs!);
 }
 
 interface RadioContextProps {
   currentTime: Date;
   activeSession: {title: string; segments: ShowSegment[]} | null;
+  activeEvent: ScheduleEntry | null;
   activeShowName: string;
   nextShowName: string | null;
   todaysSchedule: ScheduleEntry[];
@@ -62,15 +115,18 @@ interface RadioContextProps {
   volume: number;
   playbackError: string | null;
   nowPlayingTrack: AudioTrack | null;
+  nowPlayingSegment: ShowSegment | null;
   trackProgress: number;
   currentDuration: number;
   sessionProgress: number;
   sessionDuration: number;
+  isStudioMode: boolean;
   togglePlayPause: () => void;
   skipForward: () => void;
   handleVolumeChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   queueLength: number;
   currentIndex: number;
+  allMixes: ShowSegment[];
 }
 
 const RadioContext = createContext<RadioContextProps | null>(null);
@@ -78,16 +134,27 @@ const RadioContext = createContext<RadioContextProps | null>(null);
 export function RadioProvider({ children, tz = 'UTC' }: { children: React.ReactNode; tz?: string }) {
   const [currentTime, setCurrentTime] = useState(getCurrentTimeInTimezone(tz));
   const [activeSession, setActiveSession] = useState<{title: string; segments: ShowSegment[]} | null>(null);
-  const [activeShowName, setActiveShowName] = useState<string>("No Active Broadcast");
+  const [activeEvent, setActiveEvent] = useState<ScheduleEntry | null>(null);
+  const [allMixes, setAllMixes] = useState<ShowSegment[]>([]);
+  const [activeShowName, setActiveShowName] = useState<string>("OFFLINE_STANDBY");
   const [activeEventStartTime, setActiveEventStartTime] = useState<number | null>(null);
   const [nextShowName, setNextShowName] = useState<string | null>(null);
   const [todaysSchedule, setTodaysSchedule] = useState<ScheduleEntry[]>([]);
+  const [isStudioMode, setIsStudioMode] = useState(false);
+  const lastStateVersionRef = useRef<string>('');
+  const lastSessionFingerprintRef = useRef<string>('none');
 
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [volume, setVolume] = useState(1);
-  const volumeRef = useRef(1);
+  const [isPlaying, setIsPlaying] = useState(() => {
+    return localStorage.getItem('non-club-radio-play-intent') === 'true';
+  });
+  const [volume, setVolume] = useState(() => {
+    const saved = localStorage.getItem('radio-volume');
+    return saved ? parseFloat(saved) : 1;
+  });
+  const volumeRef = useRef(volume);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [nowPlayingTrack, setNowPlayingTrack] = useState<AudioTrack | null>(null);
+  const [nowPlayingSegment, setNowPlayingSegment] = useState<ShowSegment | null>(null);
   
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const [trackProgress, setTrackProgress] = useState(0);
@@ -98,27 +165,48 @@ export function RadioProvider({ children, tz = 'UTC' }: { children: React.ReactN
   const currentIndexRef = useRef<number>(0);
   const isEngagedRef = useRef(false);
 
+  // Sync isPlaying to localStorage
+  useEffect(() => {
+    localStorage.setItem('non-club-radio-play-intent', isPlaying.toString());
+  }, [isPlaying]);
+
   useEffect(() => {
     setCurrentTime(getCurrentTimeInTimezone(tz));
     const timer = setInterval(() => setCurrentTime(getCurrentTimeInTimezone(tz)), 1000);
     return () => clearInterval(timer);
   }, [tz]);
 
+  const isBusyResolving = useRef(false);
+
   useEffect(() => {
     const resolveLiveSession = async () => {
+      if (isBusyResolving.current) return;
+      isBusyResolving.current = true;
       try {
-        const schedulesStr = localStorage.getItem('transformation-radio-schedules');
-        const draftStr = localStorage.getItem('transformation-radio-draft');
+        const schedulesStr = localStorage.getItem('non-club-radio-schedules');
+        const draftStr = localStorage.getItem('non-club-radio-draft');
 
         if (!schedulesStr || !draftStr) return;
+
+        // Same-window/Multi-window change detection
+        const currentStateFingerprint = `${schedulesStr}-${draftStr}`;
+        const hasDataChanged = currentStateFingerprint !== lastStateVersionRef.current;
+        
+        lastStateVersionRef.current = currentStateFingerprint;
 
         const schedules = JSON.parse(schedulesStr) as MonthlySchedule[];
         const draft = JSON.parse(draftStr) as RadioShow;
 
+        // Populate all mixes
+        if (draft.segments) {
+          const mixes = draft.segments.filter(s => s.type === 'mix');
+          setAllMixes(mixes);
+        }
+
         const now = getCurrentTimeInTimezone(tz);
         const year = now.getFullYear();
         const month = now.getMonth();
-        const currentMins = getMinutesFromMidnight(now);
+        const currentSecs = getSecondsFromMidnight(now);
 
         const yesterday = new Date(now);
         yesterday.setDate(yesterday.getDate() - 1);
@@ -128,92 +216,143 @@ export function RadioProvider({ children, tz = 'UTC' }: { children: React.ReactN
         const currentMonthData = schedules.find(s => s.year === year && s.monthIndex === month);
         const yesterdayMonthData = schedules.find(s => s.year === yesterdayYear && s.monthIndex === yesterdayMonth);
 
-        const yesterdaysEvents = yesterdayMonthData ? computeDailySchedule(yesterdayMonthData.entries, yesterday) : [];
-        const todaysEvents = currentMonthData ? computeDailySchedule(currentMonthData.entries, now) : [];
+        const yesterdaysEvents = yesterdayMonthData ? computeDailySchedule(yesterdayMonthData.entries, yesterday, draft) : [];
+        const todaysEvents = currentMonthData ? computeDailySchedule(currentMonthData.entries, now, draft) : [];
 
-        let activeEvent: ScheduleEntry | null = null;
-        let nextEvent: ScheduleEntry | null = null;
+        let foundActiveEvent: ScheduleEntry | null = null;
+        let foundNextEvent: ScheduleEntry | null = null;
 
+        // Check yesterday's events (for shows crossing midnight)
         for (const ev of yesterdaysEvents) {
-          const endMins = ev.startTime + ev.duration;
-          if (endMins > 1440) {
-            const remainingMinsToday = endMins - 1440;
-            if (currentMins < remainingMinsToday) {
-              activeEvent = ev;
-              break;
+          const startSecs = ev.startTimeSecs || 0;
+          const durationSecs = ev.durationSecs || 3600;
+          const endSecsAbs = startSecs + durationSecs;
+          if (endSecsAbs > 86400) {
+            const overflowSecs = endSecsAbs - 86400;
+            if (currentSecs < overflowSecs) {
+              foundActiveEvent = { ...ev, startTimeSecs: startSecs - 86400 };
+              break; // Found the spilling-over show
             }
           }
         }
 
+        // Check today's events - only look if yesterday didn't provide one or to override with today's explicit midnight show
         for (let i = 0; i < todaysEvents.length; i++) {
           const ev = todaysEvents[i];
-          const endMins = ev.startTime + ev.duration;
-          if (!activeEvent && currentMins >= ev.startTime && currentMins < endMins) {
-            activeEvent = ev;
-            nextEvent = todaysEvents[i + 1] || null;
-          } else if (ev.startTime > currentMins && !nextEvent) {
-            if (activeEvent && ev.startTime >= (activeEvent.startTime + activeEvent.duration)) {
-              nextEvent = ev;
-            } else if (!activeEvent) {
-              nextEvent = ev;
-            }
+          const startSecs = ev.startTimeSecs || 0;
+          const durationSecs = ev.durationSecs || 3600;
+          const endSecs = startSecs + durationSecs;
+
+          if (currentSecs >= startSecs && currentSecs < endSecs) {
+            foundActiveEvent = ev;
+            foundNextEvent = todaysEvents[i + 1] || null;
+            break; // Found today's active show
+          } else if (startSecs > currentSecs && !foundNextEvent) {
+            foundNextEvent = ev;
           }
         }
 
-        setNextShowName(nextEvent ? nextEvent.show : null);
+        let newActiveShowName = "OFFLINE_STANDBY";
+        let newActiveEventStartTime: number | null = null;
+        let newActiveSession: {title: string; segments: ShowSegment[]} | null = null;
+        let newIsStudioMode = false;
+        let sessionToRevive = null;
 
-        if (activeEvent) {
-          if (activeEvent.show !== activeShowName) {
-            setActiveShowName(activeEvent.show);
-            setActiveEventStartTime(activeEvent.startTime);
-            const session = draft.sessions?.find(s => s.title === activeEvent!.show);
-            
-            if (session && draft.segments) {
-              const segs = session.segmentIds
-                .map(id => draft.segments.find(s => s.id === id))
-                .filter(Boolean) as ShowSegment[];
-
-              const revivedSegs = await Promise.all(segs.map(async seg => {
-                if (seg.audioSequence) {
-                  const revivedSeq = await Promise.all(seg.audioSequence.map(async t => {
-                    if (t.url.startsWith('blob:')) {
-                      try {
-                        const file = await getAudioFile(t.id);
-                        if (file) return { ...t, url: URL.createObjectURL(file) };
-                        return { ...t, url: 'blob-dead:' + t.url };
-                      } catch (e) {
-                         return { ...t, url: 'blob-dead:' + t.url };
-                      }
-                    }
-                    return t;
-                  }));
-                  return { ...seg, audioSequence: revivedSeq };
-                }
-                return seg;
-              }));
-
-              setActiveSession({ title: session.title, segments: revivedSegs });
-            } else {
-              setActiveSession(null);
-            }
-          }
+        if (foundActiveEvent) {
+          newIsStudioMode = false;
+          const session = draft.sessions?.find(s => 
+            foundActiveEvent!.sessionId ? s.id === foundActiveEvent!.sessionId : s.title === foundActiveEvent!.show
+          );
+          
+          newActiveShowName = foundActiveEvent.show;
+          newActiveEventStartTime = foundActiveEvent.startTimeSecs || 0;
+          sessionToRevive = session;
         } else {
-          setActiveShowName("No Active Broadcast");
-          setActiveEventStartTime(null);
-          setActiveSession(null);
+          // No live event - check if we should show the Studio Session in the player
+          const studioSessionId = localStorage.getItem('non-club-radio-active-session');
+          const studioSession = draft.sessions?.find(s => s.id === studioSessionId);
+          
+          if (studioSession) {
+            newIsStudioMode = true;
+            newActiveShowName = `Studio: ${studioSession.title}`;
+            newActiveEventStartTime = null;
+            sessionToRevive = studioSession;
+          }
         }
 
-        setTodaysSchedule(todaysEvents);
+        // Only revive and update if the session identity or the data has changed
+        const activeSessionId = sessionToRevive?.id;
+        const currentSessionId = activeSession?.segments?.[0]?.id ? activeSessionId : null; // Close enough for check
+        
+        // Use a fingerprint for deep change detection
+        const sessionFingerprint = sessionToRevive ? JSON.stringify(sessionToRevive.segmentIds) : 'none';
+        const sessionChanged = sessionFingerprint !== lastSessionFingerprintRef.current || newIsStudioMode !== isStudioMode;
+
+        if (sessionToRevive && (sessionChanged || hasDataChanged)) {
+            lastSessionFingerprintRef.current = sessionFingerprint;
+            const segs = sessionToRevive.segmentIds
+              .map(id => draft.segments.find(s => s.id === id))
+              .filter(Boolean) as ShowSegment[];
+
+            const revivedSegs = await Promise.all(segs.map(async seg => {
+              if (seg.audioSequence) {
+                const revivedSeq = await Promise.all(seg.audioSequence.map(async t => {
+                  if (t.url.startsWith('blob:')) {
+                    try {
+                      const file = await getAudioFile(t.id);
+                      if (file) return { ...t, url: URL.createObjectURL(file) };
+                      return { ...t, url: 'blob-dead:' + t.url };
+                    } catch (e) {
+                       return { ...t, url: 'blob-dead:' + t.url };
+                    }
+                  }
+                  return t;
+                }));
+                return { ...seg, audioSequence: revivedSeq };
+              }
+              return seg;
+            }));
+
+            newActiveSession = { title: sessionToRevive.title, segments: revivedSegs };
+            setActiveSession(newActiveSession);
+        } else if (!sessionToRevive) {
+            lastSessionFingerprintRef.current = 'none';
+            setActiveSession(null);
+        }
+
+        // Apply other state updates atomically
+        setActiveEvent(foundActiveEvent);
+        setActiveShowName(newActiveShowName);
+        setActiveEventStartTime(newActiveEventStartTime);
+        setIsStudioMode(newIsStudioMode);
+
+        if (hasDataChanged) {
+          setTodaysSchedule(todaysEvents);
+        }
 
       } catch (err) {
         console.error("Failed to parse live schedule context", err);
+      } finally {
+        isBusyResolving.current = false;
       }
     };
 
     resolveLiveSession();
-    const checkInterval = setInterval(resolveLiveSession, 5000);
-    return () => clearInterval(checkInterval);
-  }, [tz, activeShowName]);
+    
+    // Fast polling for same-tab updates
+    const checkInterval = setInterval(resolveLiveSession, 2000);
+    
+    // Immediate response to multi-tab/multi-window updates
+    window.addEventListener('storage', resolveLiveSession);
+    // Immediate response to same-tab updates
+    window.addEventListener('radio-data-updated', resolveLiveSession);
+    
+    return () => {
+      clearInterval(checkInterval);
+      window.removeEventListener('storage', resolveLiveSession);
+      window.removeEventListener('radio-data-updated', resolveLiveSession);
+    };
+  }, [tz, activeShowName, activeSession]);
 
   const cleanupAudio = useCallback(() => {
     if (currentAudioRef.current) {
@@ -229,17 +368,36 @@ export function RadioProvider({ children, tz = 'UTC' }: { children: React.ReactN
     }
   }, []);
 
+  const syncToWallClockRef = useRef<() => void>(() => {});
+
   const loadAndPlayTrack = useCallback((index: number, startTimeOffset: number = 0) => {
     if (index >= queueRef.current.length) {
+      // End of playlist
       cleanupAudio();
       setNowPlayingTrack(null);
-      setIsPlaying(false);
-      isEngagedRef.current = false;
+      setNowPlayingSegment(null);
+      
+      // If we are in Live mode, we keep 'isPlaying' true if there's a next show or if we want to stay "ready"
+      if (isStudioMode) {
+        setIsPlaying(false);
+        isEngagedRef.current = false;
+      } else {
+        // Live mode: Stay on-air, but with no track. resolveLiveSession or syncToWallClock will handle the next show.
+        // We don't explicitly set isPlaying false here to avoid killing the user's "listen" intent 
+        // during short gaps or transitions.
+      }
       return;
     }
 
     const track = queueRef.current[index];
     setNowPlayingTrack(track);
+    
+    // Find segment this track belongs to
+    if (activeSession) {
+      const segment = activeSession.segments.find(s => s.audioSequence?.some(t => t.id === track.id));
+      if (segment) setNowPlayingSegment(segment);
+    }
+
     currentIndexRef.current = index;
     cleanupAudio();
 
@@ -277,7 +435,25 @@ export function RadioProvider({ children, tz = 'UTC' }: { children: React.ReactN
       isEngagedRef.current = false;
     };
 
-    audio.onended = () => loadAndPlayTrack(index + 1);
+    audio.onloadedmetadata = () => {
+      // Correct the stored duration with the actual media duration once known
+      if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
+        if (queueRef.current[index]) {
+          queueRef.current[index].duration = audio.duration;
+        }
+      }
+    };
+
+    audio.onended = () => {
+      // Advance to next track in session
+      loadAndPlayTrack(index + 1);
+      
+      // If we just finished the last track, trigger a schedule re-resolve 
+      // to jump into the next scheduled show immediately
+      if (index + 1 >= queueRef.current.length) {
+        window.dispatchEvent(new CustomEvent('radio-data-updated'));
+      }
+    };
     audio.ontimeupdate = () => {
       setTrackProgress(audio.currentTime);
       const preDuration = queueRef.current.slice(0, index).reduce((acc, t) => acc + (t.duration || 180), 0);
@@ -291,31 +467,124 @@ export function RadioProvider({ children, tz = 'UTC' }: { children: React.ReactN
     }).catch(err => {
       if (err.name === 'NotSupportedError') {
         setPlaybackError(`Media file missing or corrupted for ${track.name}.`);
+        setIsPlaying(false);
+        isEngagedRef.current = false;
       } else if (err.name === 'NotAllowedError') {
         // This is expected for auto-play; it will resume on next user interaction
+        // We STAY in 'isPlaying' state so that the UI reflects the intent
+        // and global interaction listeners can trigger syncToWallClock
         setPlaybackError(null);
       } else if (err.name !== 'AbortError') {
         setPlaybackError(`Playback failed: ${err.message || 'Unknown error'}.`);
-      }
-      
-      if (err.name !== 'AbortError') {
-         setIsPlaying(false);
-         isEngagedRef.current = false;
+        setIsPlaying(false);
+        isEngagedRef.current = false;
       }
     });
-  }, [cleanupAudio]);
+  }, [cleanupAudio, activeSession, activeEventStartTime]);
 
-  // Global Auto-play Unlocker
-  useEffect(() => {
-    const handleGlobalInteraction = () => {
-      if (!isEngagedRef.current && currentAudioRef.current && currentAudioRef.current.src && activeSession) {
-        currentAudioRef.current.play().then(() => {
+  const syncToWallClock = useCallback(() => {
+    if (!activeSession || activeEventStartTime === null) return;
+
+    const now = getCurrentTimeInTimezone(tz);
+    const currentSecs = getSecondsFromMidnight(now);
+    let elapsedSecs = currentSecs - activeEventStartTime;
+    
+    if (elapsedSecs < 0) elapsedSecs += 86400;
+
+    const totalPlaylistDuration = queueRef.current.reduce((acc, t) => acc + (t.duration || 180), 0);
+    
+    if (totalPlaylistDuration === 0) return;
+
+    const targetOffset = elapsedSecs;
+    let totalOffset = 0;
+    let targetIndex = -1;
+    let trackOffset = 0;
+
+    for (let i = 0; i < queueRef.current.length; i++) {
+      const dur = queueRef.current[i].duration || 180;
+      if (totalOffset + dur > targetOffset) {
+        targetIndex = i;
+        trackOffset = targetOffset - totalOffset;
+        break;
+      }
+      totalOffset += dur;
+    }
+
+    // Check if the scheduled content has actually finished or if we are just in a gap
+    const isPastEnd = elapsedSecs >= totalPlaylistDuration;
+    
+    if (isPastEnd) {
+      // If we are technically past the end of the content, but the show is still scheduled to be active,
+      // we don't kill isPlaying. We let resolveLiveSession or natural completion handle it.
+      // We only kill if we've reached the very end of the playlist and no more tracks exist.
+      if (isPlaying && targetIndex === -1 && currentIndexRef.current >= queueRef.current.length - 1) {
+         // Optionally keep it alive for a few more seconds
+      }
+      return;
+    }
+
+    if (targetIndex !== -1) {
+      const currentAudio = currentAudioRef.current;
+      const currentTrackId = queueRef.current[currentIndexRef.current]?.id;
+      const targetTrackId = queueRef.current[targetIndex]?.id;
+
+      // If we are on the wrong track or significantly drifted (> 2s), re-sync
+      const needsResync = !currentAudio || 
+                          currentTrackId !== targetTrackId || 
+                          Math.abs(currentAudio.currentTime - trackOffset) > 2;
+
+      if (needsResync) {
+        loadAndPlayTrack(targetIndex, trackOffset);
+      } else if (currentAudio && currentAudio.paused && isPlaying) {
+        currentAudio.play().then(() => {
           setIsPlaying(true);
           isEngagedRef.current = true;
-          setPlaybackError(null);
         }).catch(() => {
-          // Silent catch
+          setIsPlaying(false);
+          isEngagedRef.current = false;
         });
+      }
+    }
+  }, [activeSession, activeEventStartTime, tz, loadAndPlayTrack, isPlaying]);
+
+  useEffect(() => {
+    syncToWallClockRef.current = syncToWallClock;
+  }, [syncToWallClock]);
+
+  // Handle initial auto-play attempt and session-change auto-play
+  useEffect(() => {
+    // If the show changed or we just loaded with an intent to play, sync up.
+    if (activeSession && !isStudioMode && activeEventStartTime !== null) {
+      const now = getCurrentTimeInTimezone(tz);
+      const nowSecs = getSecondsFromMidnight(now);
+      
+      // If a show JUST started (matching current second or very close) OR we have play intent, sync and play
+      const justStarted = Math.abs(nowSecs - activeEventStartTime) < 5;
+      const playIntent = localStorage.getItem('non-club-radio-play-intent') === 'true';
+      
+      if (justStarted || playIntent || isPlaying) {
+        if (!isEngagedRef.current || justStarted) {
+          syncToWallClock();
+        }
+      }
+    }
+  }, [activeSession, isStudioMode, activeEventStartTime]);
+
+  // Watch for the exact second a show starts to trigger auto-play
+  useEffect(() => {
+    if (!activeSession || isStudioMode || activeEventStartTime === null || isPlaying) return;
+    
+    const nowSecs = getSecondsFromMidnight(currentTime);
+    if (nowSecs === activeEventStartTime) {
+      syncToWallClock();
+    }
+  }, [currentTime, activeSession, isStudioMode, activeEventStartTime]);
+
+  // Global Auto-play Unlocker & Drifters Sync
+  useEffect(() => {
+    const handleGlobalInteraction = () => {
+      if (isPlaying && !isEngagedRef.current && activeSession && !isStudioMode) {
+        syncToWallClock();
       }
     };
 
@@ -323,20 +592,31 @@ export function RadioProvider({ children, tz = 'UTC' }: { children: React.ReactN
     window.addEventListener('keydown', handleGlobalInteraction, { capture: true });
     window.addEventListener('touchstart', handleGlobalInteraction, { capture: true });
 
+    // Periodic Sync (handles tab dormancy / drift)
+    const syncInterval = setInterval(() => {
+      if (isPlaying) syncToWallClock();
+    }, 15000);
+
     return () => {
       window.removeEventListener('click', handleGlobalInteraction, { capture: true });
       window.removeEventListener('keydown', handleGlobalInteraction, { capture: true });
       window.removeEventListener('touchstart', handleGlobalInteraction, { capture: true });
+      clearInterval(syncInterval);
     };
-  }, [activeSession]);
+  }, [activeSession, syncToWallClock, isPlaying]);
 
   useEffect(() => {
-    if (!activeSession || activeEventStartTime === null) {
+    // We only clear if strictly off-air
+    const hasScheduledEvent = activeEvent !== null;
+    const isActuallyOff = !activeSession && !hasScheduledEvent && !isStudioMode;
+
+    if (isActuallyOff) {
        queueRef.current = [];
        currentIndexRef.current = 0;
        if (isEngagedRef.current || isPlaying) {
           cleanupAudio();
           setNowPlayingTrack(null);
+          setNowPlayingSegment(null);
           setIsPlaying(false);
           isEngagedRef.current = false;
        }
@@ -353,88 +633,56 @@ export function RadioProvider({ children, tz = 'UTC' }: { children: React.ReactN
     const totalDuration = flatQueue.reduce((acc, t) => acc + (t.duration || 180), 0);
     setSessionDuration(totalDuration);
     
-    if (flatQueue.length > 0) {
-      // Calculate current offset based on start time vs wall clock
-      const now = getCurrentTimeInTimezone(tz);
-      const nowMins = getMinutesFromMidnight(now);
-      let elapsedSecs = (nowMins - activeEventStartTime) * 60 + now.getSeconds();
-      
-      // Handle wrap-around shows from previous day
-      if (elapsedSecs < 0) {
-        elapsedSecs += 1440 * 60;
-      }
-      
-      let totalOffset = 0;
-      let targetIndex = -1;
-      let trackOffset = 0;
-
-      for (let i = 0; i < flatQueue.length; i++) {
-        const dur = flatQueue[i].duration || 180;
-        if (totalOffset + dur > elapsedSecs) {
-          targetIndex = i;
-          trackOffset = elapsedSecs - totalOffset;
-          break;
-        }
-        totalOffset += dur;
-      }
-
-      if (targetIndex !== -1) {
-        // If we are already playing this session, don't restart it
-        if (nowPlayingTrack && queueRef.current[currentIndexRef.current]?.id === flatQueue[targetIndex].id) {
-          return;
-        }
-        loadAndPlayTrack(targetIndex, trackOffset);
-      } else {
-        // Show is over
-        cleanupAudio();
-        setNowPlayingTrack(null);
-        setIsPlaying(false);
-        isEngagedRef.current = false;
-      }
+    if (flatQueue.length > 0 && !isStudioMode) {
+      // Periodic sync will handle the initial jump too, but let's be explicit
+      syncToWallClock();
     }
-  }, [activeSession, activeEventStartTime, tz, loadAndPlayTrack, cleanupAudio]);
+  }, [activeSession, activeEventStartTime, tz, loadAndPlayTrack, cleanupAudio, syncToWallClock, isStudioMode]);
 
-  const togglePlayPause = () => {
+  const togglePlayPause = useCallback(() => {
     if (isPlaying) {
       currentAudioRef.current?.pause();
       setIsPlaying(false);
       isEngagedRef.current = false;
     } else {
-      if (currentAudioRef.current && currentAudioRef.current.src) {
-        currentAudioRef.current.play().then(() => {
-           setIsPlaying(true);
-           isEngagedRef.current = true;
-        }).catch(console.error);
-      } else if (queueRef.current.length > 0) {
-        loadAndPlayTrack(currentIndexRef.current);
+      // If we have an active session (Live), start playback
+      // Studio sessions (isStudioMode) are not "on-air" sessions
+      if (activeSession && !isStudioMode) {
+        setPlaybackError(null);
+        syncToWallClock();
+      } else {
+        // No session is on-air
+        setPlaybackError("Tuning Failed: The station is currently OFF-AIR. No live sessions are active.");
       }
     }
-  };
+  }, [isPlaying, activeSession, isStudioMode, syncToWallClock]);
 
-  const skipForward = () => {
+  const skipForward = useCallback(() => {
     if (queueRef.current.length > currentIndexRef.current + 1) {
       loadAndPlayTrack(currentIndexRef.current + 1);
     }
-  };
+  }, [loadAndPlayTrack]);
 
-  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseFloat(e.target.value);
     setVolume(val);
     volumeRef.current = val;
+    localStorage.setItem('radio-volume', val.toString());
     if (currentAudioRef.current) {
       currentAudioRef.current.volume = val;
     }
-  };
+  }, []);
 
   const currentDuration = nowPlayingTrack?.duration || currentAudioRef.current?.duration || 180;
 
   return (
     <RadioContext.Provider value={{
-      currentTime, activeSession, activeShowName, nextShowName, todaysSchedule,
-      isPlaying, volume, playbackError, nowPlayingTrack, trackProgress, currentDuration,
-      sessionProgress, sessionDuration,
+      currentTime, activeSession, activeEvent, activeShowName, nextShowName, todaysSchedule,
+      isPlaying, volume, playbackError, nowPlayingTrack, nowPlayingSegment, trackProgress, currentDuration,
+      sessionProgress, sessionDuration, isStudioMode,
       togglePlayPause, skipForward, handleVolumeChange,
-      queueLength: queueRef.current.length, currentIndex: currentIndexRef.current
+      queueLength: queueRef.current.length, currentIndex: currentIndexRef.current,
+      allMixes
     }}>
       {children}
     </RadioContext.Provider>

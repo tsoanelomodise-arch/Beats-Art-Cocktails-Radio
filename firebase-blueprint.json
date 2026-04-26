@@ -14,14 +14,71 @@
         }
       },
       "required": ["email", "role"]
+    },
+    "RadioShow": {
+      "title": "Radio Show",
+      "description": "Full show data including segments and sessions",
+      "type": "object",
+      "properties": {
+        "segments": { "type": "array" },
+        "sessions": { "type": "array" }
+      }
+    },
+    "Schedule": {
+      "title": "Monthly Schedule",
+      "description": "Programming schedule for a specific month",
+      "type": "object",
+      "properties": {
+        "year": { "type": "number" },
+        "monthIndex": { "type": "number" },
+        "entries": { "type": "array" }
+      }
+    },
+    "PublicEvent": {
+      "title": "Public Event",
+      "description": "Event displayed on the landing page",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "location": { "type": "string" },
+        "date": { "type": "string" },
+        "icon": { "type": "string" },
+        "badge": { "type": "string", "enum": ["Available", "Limited", "Sold Out", "Recent"] },
+        "isRecent": { "type": "boolean" },
+        "thumbnailUrl": { "type": "string" },
+        "order": { "type": "number" }
+      }
     }
   },
   "firestore": {
+    "/events/{eventId}": {
+      "schema": {
+        "$ref": "#/entities/PublicEvent"
+      },
+      "description": "Public events displayed on website"
+    },
     "/admins/{userId}": {
       "schema": {
         "$ref": "#/entities/Admin"
       },
       "description": "Admins"
+    },
+    "/drafts/main": {
+      "schema": {
+        "$ref": "#/entities/RadioShow"
+      },
+      "description": "The main radio show draft content"
+    },
+    "/schedules/{monthId}": {
+      "schema": {
+        "$ref": "#/entities/Schedule"
+      },
+      "description": "Monthly schedules"
+    },
+    "/test/connection": {
+      "schema": { "type": "object", "properties": { "ok": { "type": "boolean" } } },
+      "description": "Connection test document"
     }
   }
 }

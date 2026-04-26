@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import Logo from './Logo';
 import { 
   Plus, 
   GripVertical, 
@@ -32,19 +33,20 @@ import { motion, AnimatePresence, Reorder } from 'motion/react';
 import JSZip from 'jszip';
 
 const SEGMENT_TYPES: { type: SegmentType; label: string; icon: any; color: string }[] = [
-  { type: 'talk', label: 'Host Segment', icon: Mic, color: 'text-blue-400' },
-  { type: 'interview', label: 'Interview', icon: Radio, color: 'text-purple-400' },
-  { type: 'story', label: 'Storytelling', icon: Sparkles, color: 'text-amber-400' },
-  { type: 'documentary', label: 'Documentary', icon: FileText, color: 'text-emerald-400' },
-  { type: 'music', label: 'Music Track', icon: Music, color: 'text-pink-400' },
-  { type: 'ad', label: 'Advertisement', icon: Megaphone, color: 'text-orange-400' },
-  { type: 'jingle', label: 'Station Jingle', icon: Sparkles, color: 'text-yellow-400' },
-  { type: 'news', label: 'News Bullet', icon: FileText, color: 'text-red-400' },
+  { type: 'talk', label: 'Spoken Transmission', icon: Mic, color: 'text-white' },
+  { type: 'interview', label: 'External Link', icon: Radio, color: 'text-white' },
+  { type: 'story', label: 'Narrative Data', icon: Sparkles, color: 'text-white' },
+  { type: 'documentary', label: 'Archival Research', icon: FileText, color: 'text-white' },
+  { type: 'music', label: 'Audio Export', icon: Music, color: 'text-white' },
+  { type: 'ad', label: 'Network Bulletin', icon: Megaphone, color: 'text-white' },
+  { type: 'jingle', label: 'Station Signature', icon: Sparkles, color: 'text-white' },
+  { type: 'news', label: 'System Update', icon: FileText, color: 'text-white' },
+  { type: 'mix', label: 'Studio Mix', icon: Volume2, color: 'text-white' },
 ];
 
 const SCRIPTABLE_TYPES: SegmentType[] = ['talk', 'news', 'interview', 'documentary', 'story'];
 
-const STORAGE_KEY = 'transformation-radio-draft';
+const STORAGE_KEY = 'non-club-radio-draft';
 
 import { saveAudioFile, getAudioFile } from '../lib/storage';
 
@@ -52,19 +54,19 @@ export default function ShowBuilder() {
   const [show, setShow] = useState<RadioShow>({
     id: '1',
     title: '',
-    description: 'A masterpiece in the making',
+    description: 'SYSTEM_DRAFT_V1',
     segments: [
-      { id: 'start', type: 'jingle', title: 'Station Intro', content: 'Beats, Art & Cocktails Identity v1' },
-      { id: 'welcome', type: 'talk', title: 'Host Intro', content: "Welcome to Beats, Art & Cocktails. I'm your host, Thandi.", voiceId: 'Thandi', styleLabel: 'Normal' }
+      { id: 'start', type: 'jingle', title: 'Transmission_Init', content: 'Non-Club Radio Identity v1' },
+      { id: 'welcome', type: 'talk', title: 'Link_Established', content: "Link active. Systems nominal. Initializing sequence.", voiceId: 'Thandi', styleLabel: 'Normal' }
     ],
     sessions: [
-      { id: 'session1', title: 'Morning Broadcast Default', segmentIds: ['start', 'welcome'] }
+      { id: 'session1', title: 'DEFAULT_SEQUENCE', segmentIds: ['start', 'welcome'] }
     ],
     createdAt: new Date().toISOString()
   });
 
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
-    return localStorage.getItem('transformation-radio-active-session') || 'session1';
+    return localStorage.getItem('non-club-radio-active-session') || 'session1';
   });
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
   
@@ -77,6 +79,8 @@ export default function ShowBuilder() {
   const [audioPlayer, setAudioPlayer] = useState<HTMLAudioElement | null>(null);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const playlistRef = useRef<{ segmentId: string; tracks: AudioTrack[]; currentIndex: number } | null>(null);
+  const timelineScrollRef = useRef<HTMLDivElement>(null);
+  const editorScrollRef = useRef<HTMLDivElement>(null);
 
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'idle'>('idle');
   const [lastSaved, setLastSaved] = useState<string | null>(null);
@@ -110,7 +114,7 @@ export default function ShowBuilder() {
         }
         setShow(parsed);
         // Pre-select the session, preferring the one from localStorage if it exists in the loaded show
-        const savedSessionId = localStorage.getItem('transformation-radio-active-session');
+        const savedSessionId = localStorage.getItem('non-club-radio-active-session');
         if (savedSessionId && parsed.sessions.some((s: any) => s.id === savedSessionId)) {
           setActiveSessionId(savedSessionId);
         } else {
@@ -165,6 +169,10 @@ export default function ShowBuilder() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
       setSaveStatus('saved');
       setLastSaved(new Date().toLocaleTimeString());
+      
+      // Dispatch custom event for immediate Radio sync
+      window.dispatchEvent(new CustomEvent('radio-data-updated'));
+
       // Reset status back to idle after a delay
       setTimeout(() => setSaveStatus('idle'), 3000);
     }, 500); // Simulate network latency/processing
@@ -173,7 +181,8 @@ export default function ShowBuilder() {
   // Persist activeSessionId separately
   useEffect(() => {
     if (activeSessionId) {
-      localStorage.setItem('transformation-radio-active-session', activeSessionId);
+      localStorage.setItem('non-club-radio-active-session', activeSessionId);
+      window.dispatchEvent(new CustomEvent('radio-data-updated'));
     }
   }, [activeSessionId]);
 
@@ -381,6 +390,19 @@ export default function ShowBuilder() {
     });
   };
 
+  const handleThumbnailUpload = async (segmentId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.[0]) return;
+    const file = e.target.files[0];
+    
+    // Convert to base64 for local storage (since and indexedDB is already used for audio)
+    // Actually, for simplicity and since thumbnails are small, base64 is okay here.
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      updateSegment(segmentId, { thumbnail: reader.result as string });
+    };
+    reader.readAsDataURL(file);
+  };
+
   const removeTrack = (segmentId: string, trackId: string) => {
     const existingSegment = show.segments.find(s => s.id === segmentId);
     const existingTracks = existingSegment?.audioSequence || [];
@@ -480,6 +502,21 @@ export default function ShowBuilder() {
     }));
   };
 
+  // Auto-scroll logic for better UX
+  useEffect(() => {
+    if (activeSegmentId) {
+      // Find the element and scroll to it smoothly
+      const element = document.getElementById(`segment-${activeSegmentId}`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+      // Also scroll editor to top
+      if (editorScrollRef.current) {
+        editorScrollRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }
+  }, [activeSegmentId]);
+
   const deleteSegment = (id: string) => {
     setShow(prev => ({
       ...prev,
@@ -575,9 +612,9 @@ export default function ShowBuilder() {
   };
 
   return (
-    <div className="flex h-full bg-[#050508]">
+    <div className="flex h-full bg-[#1e2022]">
       {/* Left Pane: Timeline */}
-      <div className="w-[450px] border-r border-border flex flex-col bg-surface/20">
+      <div className="w-[450px] border-r border-border flex flex-col bg-[#2a2d30]/20">
         <div className="p-8 border-b border-border flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4 text-[10px] font-black uppercase tracking-[2px] text-text-secondary">
@@ -623,15 +660,15 @@ export default function ShowBuilder() {
             </div>
           </div>
           
-          <div className="flex items-center justify-between p-3 rounded-xl bg-surface/50 border border-border">
+          <div className="flex items-center justify-between p-3 rounded-xl bg-[#2a2d30]/50 border border-border">
             <div className="flex items-center gap-2 flex-1 relative min-w-0">
               <select 
                 value={activeSessionId}
                 onChange={e => setActiveSessionId(e.target.value)}
-                className="bg-accent/10 border-none text-accent text-xs font-black uppercase tracking-wider rounded-lg px-3 py-2 outline-none appearance-none cursor-pointer max-w-[140px] truncate"
+                className="bg-accent/10 border-none text-[#f2e7d5] text-xs font-black uppercase tracking-wider rounded-lg px-3 py-2 outline-none appearance-none cursor-pointer max-w-[140px] truncate"
               >
                 {(show.sessions || []).map(s => (
-                  <option key={s.id} value={s.id}>{s.title}</option>
+                  <option key={s.id} value={s.id} className="bg-[#1e2022] text-white">{s.title}</option>
                 ))}
               </select>
               <ChevronDown size={12} className="absolute left-[120px] text-accent pointer-events-none" />
@@ -700,7 +737,7 @@ export default function ShowBuilder() {
           </h3>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 pt-2">
+        <div className="flex-1 overflow-y-auto p-6 pt-2 mask-fade-out" ref={timelineScrollRef}>
           {!activeSession ? (
             <div className="text-center text-text-secondary text-sm p-4">Please select or create a session.</div>
           ) : (
@@ -715,7 +752,7 @@ export default function ShowBuilder() {
                   )
                 }))
               }}
-              className="space-y-3"
+              className="space-y-3 pb-24"
             >
               {sessionSegments.map((segment, index) => {
                 const TypeIcon = SEGMENT_TYPES.find(t => t.type === segment.type)?.icon || Mic;
@@ -724,24 +761,25 @@ export default function ShowBuilder() {
                 return (
                   <Reorder.Item 
                     key={segment.id}
+                    id={`segment-${segment.id}`}
                     value={segment}
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, scale: 0.95 }}
                     onClick={() => setActiveSegmentId(segment.id)}
                     className={`group relative p-5 rounded-2xl border transition-all cursor-grab active:cursor-grabbing flex items-center gap-5
-                      ${activeSegmentId === segment.id ? 'bg-accent/10 border-accent shadow-xl shadow-accent/5' : 'bg-surface/40 border-border hover:border-white/20'}
+                      ${activeSegmentId === segment.id ? 'bg-[#5c191c]/20 border-accent shadow-xl shadow-accent/5' : 'bg-[#2a2d30]/40 border-border hover:border-white/20'}
                     `}
                   >
                     <div className="flex items-center gap-4 flex-1 min-w-0">
                       <div className="text-text-secondary/20 group-hover:text-text-secondary/40 transition-colors">
                         <GripVertical size={16} />
                       </div>
-                      <div className={`p-3 rounded-xl bg-surface border border-border group-hover:bg-accent group-hover:border-accent transition-colors ${typeColor}`}>
+                      <div className={`p-3 rounded-xl bg-[#2a2d30] border border-border group-hover:bg-accent group-hover:border-accent transition-colors ${typeColor}`}>
                         <TypeIcon size={18} />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h4 className="text-[12px] font-black uppercase tracking-wider truncate mb-1">{segment.title}</h4>
+                        <h4 className="text-[12px] font-black uppercase tracking-wider truncate mb-1 text-[#f2e7d5]">{segment.title}</h4>
                         {segment.audioSequence && segment.audioSequence.length > 0 && (
                           <div className="flex flex-col gap-1.5 mt-2 border-t border-white/5 pt-2">
                             {segment.audioSequence.map((track, trackIdx) => (
@@ -819,8 +857,8 @@ export default function ShowBuilder() {
           )}
         </div>
 
-        <div className="p-6 border-t border-border bg-surface/30 relative">
-          <label className="text-[9px] font-black uppercase tracking-[2px] text-text-secondary mb-3 block">
+        <div className="p-6 border-t border-border bg-[#1e2022]/80 backdrop-blur-md relative">
+          <label className="text-[9px] font-black uppercase tracking-[2px] text-[#888a8c] mb-3 block">
             Segments
           </label>
           
@@ -829,7 +867,7 @@ export default function ShowBuilder() {
               <button 
                 onClick={() => setIsAddMenuOpen(!isAddMenuOpen)}
                 className={`flex-1 flex items-center justify-between p-3.5 rounded-xl border transition-all font-black uppercase tracking-widest text-[10px]
-                  ${isAddMenuOpen ? 'bg-accent border-accent text-white shadow-lg' : 'bg-surface border-border text-text-secondary hover:border-white/20 hover:text-white'}
+                  ${isAddMenuOpen ? 'bg-accent border-accent text-[#f2e7d5] shadow-lg' : 'bg-[#2a2d30] border-border text-[#f2e7d5] hover:border-accent/40 hover:text-white'}
                 `}
                 disabled={!activeSession}
                 title="Create New Segment"
@@ -851,17 +889,22 @@ export default function ShowBuilder() {
                       if (!segmentId) return;
                       setShow(prev => ({
                         ...prev,
-                        sessions: (prev.sessions || []).map(session => 
-                          session.id === activeSessionId ? { ...session, segmentIds: [...session.segmentIds, segmentId] } : session
-                        )
+                        sessions: (prev.sessions || []).map(session => {
+                          if (session.id === activeSessionId) {
+                            // Enforce uniqueness: segments should not repeat within a session
+                            if (session.segmentIds.includes(segmentId)) return session;
+                            return { ...session, segmentIds: [...session.segmentIds, segmentId] };
+                          }
+                          return session;
+                        })
                       }));
                     }}
-                    className="w-full bg-surface/50 border border-border text-text-secondary hover:text-white hover:border-white/20 transition-all text-[10px] uppercase font-black tracking-widest rounded-xl pl-3 pr-8 py-3.5 outline-none focus:border-accent appearance-none disabled:opacity-30 cursor-pointer"
+                    className="w-full bg-surface/50 border border-border text-[#f2e7d5]/90 hover:text-white hover:border-white/20 transition-all text-[10px] uppercase font-black tracking-widest rounded-xl pl-3 pr-8 py-3.5 outline-none focus:border-accent appearance-none disabled:opacity-30 cursor-pointer"
                     disabled={!activeSession || show.segments.filter(s => !(activeSession?.segmentIds || []).includes(s.id)).length === 0}
                   >
-                    <option value="" disabled>Add Existing...</option>
+                    <option value="" disabled className="bg-[#1e2022] text-white/50">Add Existing...</option>
                     {activeSession && show.segments.filter(s => !activeSession.segmentIds.includes(s.id)).map(s => (
-                      <option key={s.id} value={s.id} className="text-black">{s.title}</option>
+                      <option key={s.id} value={s.id} className="bg-[#1e2022] text-white">{s.title}</option>
                     ))}
                   </select>
                   <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none" />
@@ -889,7 +932,7 @@ export default function ShowBuilder() {
                               addSegment(st.type);
                               setIsAddMenuOpen(false);
                             }}
-                            className="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 text-[10px] font-black uppercase tracking-wider text-text-secondary hover:text-white transition-all text-left group"
+                            className="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 text-[10px] font-black uppercase tracking-wider text-[#f2e7d5]/80 hover:text-white transition-all text-left group"
                           >
                             <div className={`p-2 rounded-lg bg-surface border border-border group-hover:bg-accent group-hover:border-accent transition-colors ${st.color}`}>
                               <Icon size={14} />
@@ -908,7 +951,10 @@ export default function ShowBuilder() {
       </div>
 
       {/* Right Pane: Segment Editor */}
-      <div className="flex-1 overflow-y-auto relative bg-[radial-gradient(circle_at_center,rgba(45,99,255,0.02),transparent)]">
+      <div 
+        ref={editorScrollRef}
+        className="flex-1 overflow-y-auto relative bg-[#1e2022] scroll-smooth pb-32 shadow-inner shadow-black/20"
+      >
         <AnimatePresence mode="wait">
           {activeSegmentId ? (
             <motion.div 
@@ -923,13 +969,13 @@ export default function ShowBuilder() {
                   <header className="flex items-center justify-between">
                     <div className="space-y-2">
                       <div className="flex items-center gap-3">
-                        <span className={`text-[10px] font-black uppercase tracking-[3px] py-1 px-3 rounded-md bg-white/5 border border-white/10`}>
+                        <span className={`text-[10px] font-black uppercase tracking-[3px] py-1 px-3 rounded-md bg-[#2a2d30] border border-accent/20 text-[#f2e7d5]`}>
                           {segment.type}
                         </span>
                         <input 
                           value={segment.title}
                           onChange={e => updateSegment(segment.id, { title: e.target.value })}
-                          className="bg-transparent border-none text-4xl font-[900] tracking-tighter outline-none text-white w-96"
+                          className="bg-transparent border-none text-4xl font-[900] tracking-tighter outline-none text-[#f2e7d5] w-96 underline decoration-accent/20"
                         />
                       </div>
                     </div>
@@ -941,19 +987,89 @@ export default function ShowBuilder() {
                     </button>
                   </header>
 
+                  <div className="grid grid-cols-[200px_1fr] gap-12 pt-6 border-t border-border">
+                    <div className="space-y-4">
+                      <label className="text-[11px] font-black uppercase tracking-[2px] text-text-secondary">Segment Image</label>
+                      <div className="group relative aspect-square rounded-2xl bg-[#2a2d30] border border-border overflow-hidden flex items-center justify-center cursor-pointer shadow-xl">
+                        {segment.thumbnail ? (
+                          <>
+                            <img src={segment.thumbnail} className="w-full h-full object-cover" alt="Segment Thumbnail" />
+                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                              <span className="text-[10px] font-bold text-[#f2e7d5] uppercase tracking-widest">Change Image</span>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex flex-col items-center gap-3 text-[#888a8c] group-hover:text-[#f2e7d5] transition-colors">
+                            <Plus size={24} />
+                            <span className="text-[9px] font-bold uppercase tracking-widest">Add Thumbnail</span>
+                          </div>
+                        )}
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="absolute inset-0 opacity-0 cursor-pointer" 
+                          onChange={(e) => handleThumbnailUpload(segment.id, e)}
+                        />
+                      </div>
+                      {segment.thumbnail && (
+                        <button 
+                          onClick={() => updateSegment(segment.id, { thumbnail: undefined })}
+                          className="w-full py-2 text-[9px] font-bold text-red-400 uppercase tracking-widest hover:bg-red-400/10 rounded-lg transition-colors"
+                        >
+                          Remove Image
+                        </button>
+                      )}
+                    </div>
+                    
+                    <div className="space-y-6">
+                      <label className="text-[11px] font-black uppercase tracking-[2px] text-text-secondary">Segment Description / Content</label>
+                      <textarea 
+                        value={segment.content}
+                        onChange={e => updateSegment(segment.id, { content: e.target.value })}
+                        placeholder="Add some context or script notes for this segment..."
+                        className="w-full h-32 bg-[#2a2d30] border border-border rounded-2xl p-6 text-sm text-[#f2e7d5]/80 outline-none focus:border-accent/50 transition-all resize-none shadow-inner"
+                      />
+                    </div>
+                  </div>
+
                   {SCRIPTABLE_TYPES.includes(segment.type) ? (
                     <div className="space-y-12">
                       <div className="space-y-6 pt-6 border-t border-border">
                         <div className="flex items-center justify-between">
                           <label className="text-[11px] font-black uppercase tracking-[2px] text-text-secondary">Segment Audio Sequence</label>
-                          <label className="cursor-pointer flex items-center gap-2 px-4 py-2 bg-accent/10 text-accent hover:bg-accent hover:text-white rounded-lg transition-all text-[10px] font-bold uppercase tracking-widest">
-                            <Upload size={14} />
-                            Upload Audio
-                            <input type="file" multiple accept="audio/*" hidden onChange={(e) => handleFileUpload(segment.id, e)} />
-                          </label>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                const originalSegment = show.segments.find(s => s.id === segment.id);
+                                if (!originalSegment) return;
+                                const newSegment: ShowSegment = {
+                                  ...originalSegment,
+                                  id: Math.random().toString(36).substr(2, 9),
+                                  title: `${originalSegment.title} (Library)`,
+                                  type: 'mix'
+                                };
+                                setShow(prev => ({
+                                  ...prev,
+                                  segments: [...prev.segments, newSegment]
+                                }));
+                                alert("Success: Segment added to global playlist (Mixes library).");
+                              }}
+                              disabled={!segment.audioSequence || segment.audioSequence.length === 0}
+                              className="flex items-center gap-2 px-4 py-2 bg-[#2a2d30] border border-accent/30 text-accent hover:bg-accent hover:text-white rounded-lg transition-all text-[10px] font-bold uppercase tracking-widest disabled:opacity-30 active:scale-95"
+                              title="Add to Global Mixes Library"
+                            >
+                              <Plus size={14} />
+                              Add to Playlist
+                            </button>
+                            <label className="cursor-pointer flex items-center gap-2 px-4 py-2 bg-accent text-[#f2e7d5] hover:bg-white hover:text-black rounded-lg transition-all text-[10px] font-bold uppercase tracking-widest shadow-lg active:scale-95">
+                              <Upload size={14} />
+                              Upload Audio
+                              <input type="file" multiple accept="audio/*" hidden onChange={(e) => handleFileUpload(segment.id, e)} />
+                            </label>
+                          </div>
                         </div>
 
-                        <div className="bg-surface/50 border border-border rounded-2xl p-4 min-h-[200px]">
+                        <div className="bg-[#2a2d30]/50 border border-border rounded-2xl p-4 min-h-[200px] shadow-inner">
                           {(!segment.audioSequence || segment.audioSequence.length === 0) ? (
                             <div className="h-full flex flex-col items-center justify-center p-10 opacity-40">
                               <Music size={40} className="mb-4" />
@@ -971,7 +1087,7 @@ export default function ShowBuilder() {
                                 <Reorder.Item
                                   key={track.id}
                                   value={track}
-                                  className="flex items-center gap-4 p-3 rounded-xl bg-surface border border-white/5 hover:border-white/20 group cursor-grab active:cursor-grabbing transition-colors"
+                                  className="flex items-center gap-4 p-4 rounded-2xl bg-[#1e2022] border border-white/[0.03] hover:border-accent/30 group cursor-grab active:cursor-grabbing transition-all shadow-md"
                                 >
                                   <div className="text-white/20">
                                     <GripVertical size={16} />
@@ -1022,7 +1138,7 @@ export default function ShowBuilder() {
                                 className={`flex items-center gap-3 px-8 py-4 rounded-xl font-black uppercase tracking-widest text-xs transition-all shadow-xl active:scale-95
                                   ${playingSegmentId === segment.id && playlistRef.current
                                     ? 'bg-accent/20 text-accent border border-accent/50' 
-                                    : 'bg-white text-black hover:bg-white/90 border border-transparent'
+                                    : 'bg-[#f2e7d5] text-black hover:bg-white border border-transparent shadow-xl shadow-[#f2e7d5]/5'
                                   }
                                 `}
                               >
@@ -1075,8 +1191,8 @@ export default function ShowBuilder() {
                       </div>
                     </div>
                   ) : (
-                    <div className="max-w-2xl bg-surface border border-border rounded-[32px] p-12 text-center space-y-8">
-                      <div className={`w-24 h-24 rounded-full bg-accent/10 border-2 border-accent/20 flex items-center justify-center mx-auto text-accent`}>
+                    <div className="max-w-2xl bg-[#2a2d30]/40 border border-border rounded-[32px] p-12 text-center space-y-8 shadow-2xl backdrop-blur-sm">
+                      <div className={`w-24 h-24 rounded-full bg-accent/10 border-2 border-accent/20 flex items-center justify-center mx-auto text-accent shadow-inner`}>
                         {(() => {
                           const Icon = SEGMENT_TYPES.find(t => t.type === segment.type)?.icon || Mic;
                           return <Icon size={40} />;
@@ -1092,11 +1208,36 @@ export default function ShowBuilder() {
                       <div className="bg-[#0a0c14] border border-border rounded-xl p-6 text-left">
                         <div className="flex items-center justify-between mb-4">
                           <label className="text-[11px] font-black uppercase tracking-[2px] text-text-secondary">Assigned Audio</label>
-                          <label className="cursor-pointer flex items-center gap-2 px-3 py-1.5 bg-accent/10 text-accent hover:bg-accent hover:text-white rounded-lg transition-all text-[9px] font-bold uppercase tracking-widest">
-                            <Upload size={12} />
-                            Upload Audio
-                            <input type="file" multiple accept="audio/*" hidden onChange={(e) => handleFileUpload(segment.id, e)} />
-                          </label>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                const originalSegment = show.segments.find(s => s.id === segment.id);
+                                if (!originalSegment) return;
+                                const newSegment: ShowSegment = {
+                                  ...originalSegment,
+                                  id: Math.random().toString(36).substr(2, 9),
+                                  title: `${originalSegment.title} (Library)`,
+                                  type: 'mix'
+                                };
+                                setShow(prev => ({
+                                  ...prev,
+                                  segments: [...prev.segments, newSegment]
+                                }));
+                                alert("Success: Segment added to global playlist (Mixes library).");
+                              }}
+                              disabled={!segment.audioSequence || segment.audioSequence.length === 0}
+                              className="flex items-center gap-2 px-3 py-1.5 bg-[#12141c] border border-accent/20 text-accent hover:bg-accent hover:text-white rounded-lg transition-all text-[9px] font-bold uppercase tracking-widest disabled:opacity-30 active:scale-95"
+                              title="Add to Global Mixes Library"
+                            >
+                              <Plus size={12} />
+                              Add to Playlist
+                            </button>
+                            <label className="cursor-pointer flex items-center gap-2 px-3 py-1.5 bg-accent/10 text-accent hover:bg-accent hover:text-white rounded-lg transition-all text-[9px] font-bold uppercase tracking-widest">
+                              <Upload size={12} />
+                              Upload Audio
+                              <input type="file" multiple accept="audio/*" hidden onChange={(e) => handleFileUpload(segment.id, e)} />
+                            </label>
+                          </div>
                         </div>
                         
                         {(!segment.audioSequence || segment.audioSequence.length === 0) ? (
@@ -1161,10 +1302,10 @@ export default function ShowBuilder() {
                             <div className="flex items-center gap-4">
                               <button
                                 onClick={() => toggleSegmentPreview(segment)}
-                                className={`flex items-center gap-2 px-6 py-3 rounded-xl font-black uppercase tracking-widest text-[10px] transition-all
+                                className={`flex items-center gap-2 px-6 py-3 rounded-xl font-black uppercase tracking-widest text-[10px] transition-all shadow-lg active:scale-95
                                   ${playingSegmentId === segment.id && playlistRef.current
                                     ? 'bg-accent/20 text-accent border border-accent/50' 
-                                    : 'bg-white text-black hover:bg-white/90 border border-transparent'
+                                    : 'bg-[#f2e7d5] text-black hover:bg-white border border-transparent'
                                   }
                                 `}
                               >

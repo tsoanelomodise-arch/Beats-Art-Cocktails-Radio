@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import Logo from './Logo';
 import { 
   Calendar as CalendarIcon, 
   Upload, 
@@ -14,8 +15,27 @@ import {
   List as ListIcon, 
   X,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  ListOrdered,
+  GripVertical
 } from 'lucide-react';
+import { 
+  DndContext, 
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { MonthlySchedule, ScheduleEntry, ScheduleMode, RadioShow } from '../types';
 import { computeDailySchedule } from '../lib/RadioContext';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -40,16 +60,13 @@ import { getCurrentTimeInTimezone, getStationTimezone } from '../lib/timezone';
 
 const INITIAL_SCHEDULE: MonthlySchedule[] = [
   {
-    year: 2025,
-    monthIndex: 10, // November
-    theme: "Finance Focus: Closing Strong",
+    year: 2026,
+    monthIndex: 3, // April
+    theme: "ARCHIVE_SYNC: ANALOG_MASTERY",
     entries: [
-      { id: '1', time: "06:00–09:00", startTime: 360, duration: 180, show: "Morning Hustle", focus: "News, traffic, motivation, funding updates", category: 'news', daysOfWeek: [1, 2, 3, 4, 5] },
-      { id: '2', time: "09:00–12:00", startTime: 540, duration: 180, show: "Enterprise Unlocked", focus: "Interviews & business showcases", category: 'business', daysOfWeek: [1, 2, 3, 4, 5] },
-      { id: '3', time: "12:00–15:00", startTime: 720, duration: 180, show: "Lunch & Learn", focus: "Masterclasses & skills", category: 'talk', daysOfWeek: [1, 2, 3, 4, 5] },
-      { id: '4', time: "15:00–18:00", startTime: 900, duration: 180, show: "Drive to Thrive", focus: "On-air coaching & shoutouts", category: 'creative', daysOfWeek: [1, 2, 3, 4, 5] },
-      { id: '5', time: "18:00–21:00", startTime: 1080, duration: 180, show: "Innovators’ Lounge", focus: "Youth, tech, creative industry", category: 'creative', daysOfWeek: [1, 2, 3, 4, 5] },
-      { id: '6', time: "21:00–00:00", startTime: 1260, duration: 180, show: "TFM Sessions", focus: "Deep House & storytelling", category: 'music', daysOfWeek: [1, 2, 3, 4, 5, 0, 6] },
+      { id: '1', time: "00:00–06:00", startTime: 0, duration: 360, show: "NIGHT_MODE", focus: "Deep ambient, structural minimalism", category: 'music', daysOfWeek: [1, 2, 3, 4, 5, 0, 6] },
+      { id: '2', time: "09:00–12:00", startTime: 540, duration: 180, show: "ACADEMY_SESSIONS", focus: "Technical masterclasses, vinyl technique", category: 'creative', daysOfWeek: [1, 2, 3, 4, 5] },
+      { id: '3', time: "20:00–00:00", startTime: 1200, duration: 240, show: "NON_CLUB_SYNC", focus: "Live performance, experimental electronic", category: 'music', daysOfWeek: [5, 6] },
     ]
   }
 ];
@@ -57,10 +74,78 @@ const INITIAL_SCHEDULE: MonthlySchedule[] = [
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const DAYS_OF_WEEK = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 
+function SortableItem({ id, entry, onEdit, onDelete }: { id: string, entry: ScheduleEntry, onEdit: () => void, onDelete: () => void, key?: any }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 50 : 0
+  };
+
+  return (
+    <div 
+      ref={setNodeRef} 
+      style={style} 
+      className={`p-6 rounded-3xl bg-[#2a2d30]/40 border border-border flex items-center justify-between group transition-all ${isDragging ? 'opacity-50 ring-2 ring-accent scale-[1.02] shadow-2xl' : 'hover:bg-accent/[0.05]'}`}
+    >
+      <div className="flex items-center gap-6">
+        <div 
+          {...attributes} 
+          {...listeners} 
+          className="cursor-grab active:cursor-grabbing p-2 text-text-secondary hover:text-accent transition-colors"
+        >
+          <GripVertical size={20} />
+        </div>
+        <div className="flex items-center gap-8">
+           <div className="w-32 flex flex-col gap-1">
+            <span className="text-accent font-mono text-xs tracking-tighter">
+              {entry.startTime === null ? "AUTO" : entry.time}
+            </span>
+            <div className="flex gap-1">
+              {entry.daysOfWeek?.slice(0, 3).map(d => (
+                <span key={d} className="text-[7px] font-black px-1 py-0.5 rounded-sm bg-accent/10 text-accent/80 uppercase">
+                  {["S", "M", "T", "W", "T", "F", "S"][d]}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div>
+            <h3 className="text-xl font-black uppercase tracking-tight group-hover:text-accent transition-colors">{entry.show}</h3>
+            <p className="text-[#8e95ab] text-xs mt-0.5 truncate max-w-sm">{entry.focus}</p>
+          </div>
+        </div>
+      </div>
+      
+      <div className="flex gap-2">
+        <button 
+          onClick={onEdit} 
+          className="p-3 rounded-lg border border-border text-text-secondary hover:text-white hover:bg-white/5 transition-all"
+        >
+          <Edit2 size={14} />
+        </button>
+        <button 
+          onClick={onDelete} 
+          className="p-3 rounded-lg border border-border text-text-secondary hover:text-red-400 hover:bg-red-400/5 transition-all"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
   const [schedules, setSchedules] = useState<MonthlySchedule[]>(() => {
     try {
-      const stored = localStorage.getItem('transformation-radio-schedules');
+      const stored = localStorage.getItem('non-club-radio-schedules');
       if (stored) return JSON.parse(stored);
     } catch (e) {
       console.error("Failed to load schedules from local storage", e);
@@ -69,17 +154,69 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
   });
   const [currentDate, setCurrentDate] = useState(() => getCurrentTimeInTimezone(tz));
   const [mode, setMode] = useState<ScheduleMode>('list'); // Default to list view
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    
+    if (over && active.id !== over.id) {
+      setSchedules(prev => {
+        const copy = [...prev];
+        const monthIndex = copy.findIndex(s => s.year === currentYear && s.monthIndex === currentMonthIndex);
+        if (monthIndex !== -1) {
+          const monthCopy = { ...copy[monthIndex] };
+          const oldIndex = monthCopy.entries.findIndex(e => e.id === active.id);
+          const newIndex = monthCopy.entries.findIndex(e => e.id === over.id);
+          monthCopy.entries = arrayMove(monthCopy.entries, oldIndex, newIndex);
+          copy[monthIndex] = monthCopy;
+        }
+        return copy;
+      });
+    }
+  };
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingShow, setEditingShow] = useState<ScheduleEntry | null>(null);
+  const [isTypingShowTitle, setIsTypingShowTitle] = useState(false);
   const [editingYear, setEditingYear] = useState<number>(() => getCurrentTimeInTimezone(tz).getFullYear());
   const [editingMonth, setEditingMonth] = useState<number>(() => getCurrentTimeInTimezone(tz).getMonth());
   const [studioSessions, setStudioSessions] = useState<{id: string, title: string}[]>([]);
   const [fullShowData, setFullShowData] = useState<RadioShow | null>(null);
 
+  const openEditModal = (entry: ScheduleEntry) => {
+    setEditingYear(currentYear);
+    setEditingMonth(currentMonthIndex);
+    setEditingShow(entry);
+    // If show title is empty OR not in studio sessions, default to typing mode
+    setIsTypingShowTitle(!entry.show || !studioSessions.some(s => s.title === entry.show));
+  };
+
+  const getDerivedDataForShow = (title: string) => {
+    let duration = editingShow?.duration || 60;
+    let sessionId = '';
+    
+    if (fullShowData && fullShowData.sessions) {
+      const session = fullShowData.sessions.find((s: any) => s.title === title);
+      if (session) {
+        const sessionSegments = session.segmentIds.map((id: string) => fullShowData.segments.find((seg: any) => seg.id === id)).filter(Boolean);
+        const totalSeconds = sessionSegments.reduce((acc: number, s: any) => acc + (s.duration || 180), 0);
+        duration = Math.ceil(totalSeconds / 60);
+        sessionId = session.id;
+      }
+    }
+    return { duration, sessionId };
+  };
+
   // Sync schedules to localStorage when modified
   useEffect(() => {
-    localStorage.setItem('transformation-radio-schedules', JSON.stringify(schedules));
+    localStorage.setItem('non-club-radio-schedules', JSON.stringify(schedules));
+    window.dispatchEvent(new CustomEvent('radio-data-updated'));
   }, [schedules]);
 
   // Sync date when timezone changes
@@ -87,9 +224,9 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
     setCurrentDate(getCurrentTimeInTimezone(tz));
   }, [tz]);
 
-  useEffect(() => {
+  const loadSessionsFromDraft = () => {
     try {
-      const draft = localStorage.getItem('transformation-radio-draft');
+      const draft = localStorage.getItem('non-club-radio-draft');
       if (draft) {
         const parsed = JSON.parse(draft) as RadioShow;
         setFullShowData(parsed);
@@ -100,6 +237,15 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
     } catch (err) {
       console.error('Failed to load sessions', err);
     }
+  };
+
+  useEffect(() => {
+    loadSessionsFromDraft();
+    
+    // Listen for updates from other components (like Studio)
+    const handleUpdate = () => loadSessionsFromDraft();
+    window.addEventListener('radio-data-updated', handleUpdate);
+    return () => window.removeEventListener('radio-data-updated', handleUpdate);
   }, []);
 
   const currentYear = currentDate.getFullYear();
@@ -183,7 +329,7 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
                       specificDate: { type: Type.STRING },
                       category: { 
                         type: Type.STRING, 
-                        enum: ['news', 'music', 'talk', 'business', 'creative'] 
+                        enum: ['system', 'audio', 'spoken', 'archive', 'creative'] 
                       }
                     },
                     required: ["time", "show", "focus", "startTime", "duration"]
@@ -272,7 +418,7 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
       setStudioSessions(prev => [...prev, { id: newSessionId, title: updated.show }]);
       
       try {
-        const draft = localStorage.getItem('transformation-radio-draft');
+        const draft = localStorage.getItem('non-club-radio-draft');
         if (draft) {
           const parsed = JSON.parse(draft) as RadioShow;
           if (parsed) {
@@ -282,7 +428,7 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
               title: updated.show,
               segmentIds: []
             });
-            localStorage.setItem('transformation-radio-draft', JSON.stringify(parsed));
+            localStorage.setItem('non-club-radio-draft', JSON.stringify(parsed));
           }
         }
       } catch (err) {
@@ -322,12 +468,12 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
       
       // Remove from global draft to update Studio
       try {
-        const draft = localStorage.getItem('transformation-radio-draft');
+        const draft = localStorage.getItem('non-club-radio-draft');
         if (draft) {
           const parsed = JSON.parse(draft) as RadioShow;
           if (parsed && parsed.sessions) {
             parsed.sessions = parsed.sessions.filter(s => s.title !== deletedShowTitle);
-            localStorage.setItem('transformation-radio-draft', JSON.stringify(parsed));
+            localStorage.setItem('non-club-radio-draft', JSON.stringify(parsed));
           }
         }
       } catch (err) {
@@ -337,25 +483,17 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
   };
 
   const getDayEvents = (day: Date) => {
-    return computeDailySchedule(currentMonthSchedule.entries, day);
+    return computeDailySchedule(currentMonthSchedule.entries, day, fullShowData || undefined);
   };
 
   const getComputedEntriesForWeekday = (dIdx: number) => {
-    const filtered = currentMonthSchedule.entries.filter(e => e.daysOfWeek?.includes(dIdx) && !e.specificDate);
-    const computed: ScheduleEntry[] = [];
-    let currentEnd = 0;
+    // Create a representative date for that weekday within the current viewing interval
+    const monthStart = startOfMonth(currentDate);
+    const firstDay = startOfWeek(monthStart);
+    const targetDay = new Date(firstDay);
+    targetDay.setDate(firstDay.getDate() + dIdx);
     
-    for (const e of filtered) {
-       if (e.startTime !== undefined && e.startTime !== null && !isNaN(e.startTime)) {
-          computed.push(e as ScheduleEntry);
-          currentEnd = e.startTime + (e.duration || 0);
-       } else {
-          computed.push({ ...e, startTime: currentEnd } as ScheduleEntry);
-          currentEnd = currentEnd + (e.duration || 0);
-       }
-    }
-  
-    return computed.sort((a, b) => (a.startTime as number) - (b.startTime as number));
+    return computeDailySchedule(currentMonthSchedule.entries, targetDay, fullShowData || undefined);
   };
 
   const sortedEntries = useMemo(() => {
@@ -418,36 +556,41 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
     return result;
   }, [currentMonthSchedule.entries]);
 
-  const allSessionTitles = useMemo(() => {
+  const availableFollowTitles = useMemo(() => {
     const titles = new Set<string>();
     
     // 1. Studio Sessions (Live creations)
     studioSessions.forEach(s => { 
-      if (s.title && !s.title.match(/^(Untitled Session|New Session|Default Session)/i)) {
+      if (s.title) {
         titles.add(s.title); 
       }
     });
     
-    // 2. Currently Scheduled Entries (Relevant context)
-    currentMonthSchedule.entries.forEach(e => {
-       if (e.show && !e.show.match(/^(Untitled Session|New Session|Default Session)/i)) {
-         titles.add(e.show);
-       }
-    });
+    // 2. Scheduled entries for the month currently being edited
+    const editingSchedule = schedules.find(s => s.year === editingYear && s.monthIndex === editingMonth);
+    if (editingSchedule) {
+      editingSchedule.entries.forEach(e => {
+        if (e.show) {
+          titles.add(e.show);
+        }
+      });
+    }
 
     return Array.from(titles).sort();
-  }, [studioSessions, currentMonthSchedule.entries]);
+  }, [studioSessions, schedules, editingYear, editingMonth]);
 
   return (
-    <div className="flex flex-col h-full bg-[#050508] relative">
+    <div className="flex flex-col h-full bg-[#1e2022] relative">
       {/* Header with Navigation */}
-      <div className="p-10 pb-6 flex items-end justify-between border-b border-border bg-surface/10 backdrop-blur-md sticky top-0 z-30">
-        <div className="flex flex-col">
-          <div className="flex items-center gap-3 text-accent font-black text-[10px] uppercase tracking-[3px] mb-4">
-            <Clock size={12} /> Live Station Programming
-          </div>
-          <div className="flex items-center gap-6">
-            <div className="flex gap-2">
+      <div className="p-10 pb-6 flex items-end justify-between border-b border-border bg-[#2a2d30]/20 backdrop-blur-md sticky top-0 z-30">
+        <div className="flex items-center gap-6">
+          <Logo className="w-16 h-16" />
+          <div className="flex flex-col">
+            <div className="flex items-center gap-3 text-accent font-black text-[10px] uppercase tracking-[3px] mb-4">
+              <Clock size={12} /> Live Station Programming
+            </div>
+            <div className="flex items-center gap-6 text-[#f2e7d5]">
+              <div className="flex gap-2">
               <button 
                 onClick={() => setCurrentDate(subYears(currentDate, 1))}
                 className="w-8 h-8 flex items-center justify-center border border-border rounded-lg hover:border-accent transition-all hover:bg-accent/5"
@@ -492,12 +635,13 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
             {currentMonthSchedule.theme}
           </p>
         </div>
+      </div>
 
-        <div className="flex items-center gap-4">
-          <div className="flex bg-surface/40 p-1.5 rounded-2xl border border-border">
+      <div className="flex items-center gap-4">
+          <div className="flex bg-[#2a2d30]/40 p-1.5 rounded-2xl border border-border">
             <button 
               onClick={() => setMode('calendar')}
-              className={`p-3 rounded-xl transition-all ${mode === 'calendar' ? 'bg-accent text-white shadow-lg' : 'text-text-secondary hover:text-white'}`}
+              className={`p-3 rounded-xl transition-all ${mode === 'calendar' ? 'bg-accent text-[#f2e7d5] shadow-lg' : 'text-[#888a8c] hover:text-[#f2e7d5]'}`}
               title="Month View"
             >
               <CalendarIcon size={18} />
@@ -516,20 +660,25 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
             >
               <ListIcon size={18} />
             </button>
+            <button 
+              onClick={() => setMode('playlist')}
+              className={`p-3 rounded-xl transition-all ${mode === 'playlist' ? 'bg-accent text-white shadow-lg' : 'text-text-secondary hover:text-white'}`}
+              title="Playlist Mode (Sortable)"
+            >
+              <ListOrdered size={18} />
+            </button>
           </div>
           
           <button 
             onClick={() => {
-              setEditingYear(currentYear);
-              setEditingMonth(currentMonthIndex);
-              setEditingShow({ id: '', time: '09:00–10:00', startTime: 540, duration: 60, show: '', focus: 'Description', category: 'talk', daysOfWeek: [1,2,3,4,5] });
+              openEditModal({ id: '', time: '09:00–10:00', startTime: 540, duration: 60, show: '', focus: 'Description', category: 'talk', daysOfWeek: [1,2,3,4,5] });
             }}
-            className="flex items-center gap-3 px-6 py-4 bg-white text-black font-black rounded-xl hover:bg-neutral-200 transition-all active:scale-95 text-xs uppercase tracking-widest"
+            className="flex items-center gap-3 px-6 py-4 bg-accent text-[#f2e7d5] font-black rounded-xl hover:bg-[#8e1d22] transition-all active:scale-95 text-xs uppercase tracking-widest shadow-lg shadow-accent/20"
           >
             <Plus size={16} /> Add Session
           </button>
 
-          <label className="flex items-center gap-3 px-6 py-4 bg-accent/10 border border-accent/30 text-accent font-black rounded-xl cursor-pointer hover:bg-accent hover:text-white transition-all active:scale-95 text-xs uppercase tracking-widest text center">
+          <label className="flex items-center gap-3 px-6 py-4 bg-accent/10 border border-accent/30 text-accent font-black rounded-xl cursor-pointer hover:bg-accent hover:text-[#f2e7d5] transition-all active:scale-95 text-xs uppercase tracking-widest text center">
             {isProcessing ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
             Import PDF
             <input type="file" accept=".pdf" className="hidden" onChange={handleFileUpload} disabled={isProcessing} />
@@ -561,7 +710,7 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
                   return (
                     <div 
                       key={day.toISOString()} 
-                      className={`min-h-[120px] p-2 border-r border-b border-white/[0.03] flex flex-col gap-1 hover:bg-white/[0.01] transition-colors
+                      className={`min-h-[120px] p-2 border-r border-b border-white/[0.03] flex flex-col gap-1 hover:bg-accent/5 transition-colors
                         ${!isCurrent ? 'opacity-20 grayscale' : ''}
                         ${idx % 7 === 6 ? 'border-r-0' : ''}
                       `}
@@ -575,16 +724,12 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
                         {events.map(event => (
                           <div 
                             key={`${day.toISOString()}-${event.id}`}
-                            onClick={() => {
-                              setEditingYear(currentYear);
-                              setEditingMonth(currentMonthIndex);
-                              setEditingShow(event);
-                            }}
+                            onClick={() => openEditModal(event)}
                             className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase truncate border cursor-pointer
-                              ${event.category === 'news' ? 'bg-red-500/10 border-red-500/20 text-red-100' : 
-                                event.category === 'business' ? 'bg-accent/10 border-accent/20 text-blue-100' :
-                                event.category === 'music' ? 'bg-purple-500/10 border-purple-500/20 text-purple-100' :
-                                'bg-surface/60 border-border text-white'}
+                              ${event.category === 'talk' ? 'bg-accent/10 border-accent/20 text-accent' : 
+                                event.category === 'music' ? 'bg-[#f2e7d5]/10 border-[#f2e7d5]/20 text-[#f2e7d5]' :
+                                event.category === 'creative' ? 'bg-accent/20 border-accent/40 text-[#f2e7d5]' :
+                                'bg-[#2a2d30]/60 border-border text-[#f2e7d5]'}
                             `}
                             title={`${event.time}${event.followsShowTitle ? ` (Follows: ${event.followsShowTitle})` : ''}: ${event.show}`}
                           >
@@ -624,20 +769,16 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
                       {getComputedEntriesForWeekday(dIdx).map((show) => (
                         <motion.div 
                           key={`${day}-${show.id}`}
-                          onClick={() => {
-                            setEditingYear(currentYear);
-                            setEditingMonth(currentMonthIndex);
-                            setEditingShow(show);
-                          }}
+                          onClick={() => openEditModal(show)}
                           style={{
                             top: `${((show.startTime as number) / 1440) * 100}%`,
                             height: `${(show.duration / 1440) * 100}%`
                           }}
                           className={`absolute inset-x-1 border flex flex-col justify-start overflow-hidden cursor-pointer group transition-all hover:scale-[1.02] hover:z-10
                             ${show.duration <= 30 ? 'p-2 rounded-xl' : 'p-3 rounded-2xl'}
-                            ${show.category === 'news' ? 'bg-red-500/10 border-red-500/20 text-red-100' : 
-                              show.category === 'business' ? 'bg-accent/10 border-accent/20 text-blue-100' :
-                              show.category === 'music' ? 'bg-purple-500/10 border-purple-500/20 text-purple-100' :
+                            ${show.category === 'talk' ? 'bg-accent/10 border-accent/20 text-accent' : 
+                              show.category === 'music' ? 'bg-white/10 border-white/20 text-white' :
+                              show.category === 'creative' ? 'bg-accent/20 border-accent/40 text-white' :
                               'bg-surface/60 border-border text-white'}
                           `}
                         >
@@ -657,6 +798,55 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
                 ))}
               </div>
             </motion.div>
+          ) : mode === 'playlist' ? (
+             <motion.div 
+              key="playlist"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="p-10 h-full overflow-y-auto"
+            >
+              <div className="max-w-4xl mx-auto">
+                <div className="mb-8 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xl font-black uppercase tracking-tight text-white mb-1">Broadcast Sequence</h3>
+                    <p className="text-[#8e95ab] text-xs uppercase tracking-widest font-bold">Drag to reorder shows — Reordering affects auto-follow sequence</p>
+                  </div>
+                  <div className="px-4 py-2 bg-accent/10 border border-accent/20 rounded-lg text-accent text-[10px] font-black uppercase tracking-widest">
+                    {currentMonthSchedule.entries.length} Entries
+                  </div>
+                </div>
+
+                <DndContext 
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleDragEnd}
+                >
+                  <SortableContext 
+                    items={currentMonthSchedule.entries.map(e => e.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className="grid gap-3">
+                      {currentMonthSchedule.entries.map((entry) => (
+                        <SortableItem 
+                          key={entry.id} 
+                          id={entry.id} 
+                          entry={entry} 
+                          onEdit={() => openEditModal(entry)}
+                          onDelete={() => handleDeleteShow(entry.id)}
+                        />
+                      ))}
+                      {currentMonthSchedule.entries.length === 0 && (
+                        <div className="flex flex-col items-center justify-center p-32 border-2 border-dashed border-border rounded-3xl opacity-30">
+                          <ListOrdered size={48} className="mb-4" />
+                          <p className="font-black uppercase tracking-widest text-sm">No programming to sequence</p>
+                        </div>
+                      )}
+                    </div>
+                  </SortableContext>
+                </DndContext>
+              </div>
+            </motion.div>
           ) : (
             <motion.div 
               key="list"
@@ -667,7 +857,7 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
             >
               <div className="grid gap-4">
                 {sortedEntries.map((entry) => (
-                  <div key={entry.id} className="p-8 rounded-3xl bg-surface/20 border border-border flex items-center justify-between hover:bg-white/[0.02] transition-colors">
+                  <div key={entry.id} className="p-8 rounded-3xl bg-[#2a2d30]/20 border border-border flex items-center justify-between hover:bg-accent/[0.03] transition-colors">
                     <div className="flex items-center gap-10">
                       <div className="w-48 flex flex-col gap-1">
                         <span className="text-accent font-mono text-sm tracking-tighter">
@@ -697,11 +887,7 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
                     </div>
                     <div className="flex gap-4">
                       <button 
-                        onClick={() => {
-                          setEditingYear(currentYear);
-                          setEditingMonth(currentMonthIndex);
-                          setEditingShow(entry);
-                        }} 
+                        onClick={() => openEditModal(entry)} 
                         className="p-4 rounded-xl border border-border text-text-secondary hover:text-white transition-all"
                       >
                         <Edit2 size={18} />
@@ -729,7 +915,7 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
           <motion.div 
             initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="w-full max-w-xl bg-surface border border-white/10 rounded-[32px] p-10 shadow-3xl text-white"
+            className="w-full max-w-xl bg-[#1e2022] border border-accent/20 rounded-[32px] p-10 shadow-3xl text-[#f2e7d5]"
           >
             <div className="flex items-center justify-between mb-10">
               <h2 className="text-3xl font-black uppercase tracking-tighter">
@@ -770,36 +956,49 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
 
               <div className="grid grid-cols-2 gap-6">
                 <div className="space-y-2">
-                  <label className="text-[11px] font-black uppercase tracking-widest text-[#8e95ab]">Show Title</label>
-                  <div className="relative">
-                    <select 
-                      className="w-full bg-[#1a1c26] border border-white/5 rounded-xl p-4 text-white outline-none focus:border-accent transition-all font-bold appearance-none" 
-                      value={editingShow.show} 
-                      onChange={e => {
-                        const selectedTitle = e.target.value;
-                        let newDuration = editingShow.duration;
-                        
-                        if (fullShowData) {
-                          const session = fullShowData.sessions.find(s => s.title === selectedTitle);
-                          if (session) {
-                            const sessionSegments = session.segmentIds.map(id => fullShowData.segments.find(seg => seg.id === id)).filter(Boolean);
-                            const totalSeconds = sessionSegments.reduce((acc, s) => acc + (s!.duration || 180), 0);
-                            newDuration = Math.ceil(totalSeconds / 60);
-                          }
-                        }
-                        
-                        setEditingShow({...editingShow, show: selectedTitle, duration: newDuration});
-                      }}
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-black uppercase tracking-widest text-[#8e95ab]">Show Title</label>
+                    <button 
+                      onClick={() => setIsTypingShowTitle(!isTypingShowTitle)}
+                      className="text-[9px] font-black uppercase tracking-widest text-accent hover:underline px-2"
                     >
-                      <option value="" disabled>Select a Show from Studio...</option>
-                      {studioSessions.map((session) => (
-                        <option key={session.id} value={session.title}>{session.title}</option>
-                      ))}
-                      {editingShow.show && !studioSessions.some(s => s.title === editingShow.show) && (
-                        <option value={editingShow.show}>{editingShow.show} (Custom)</option>
-                      )}
-                    </select>
-                    <ChevronDown size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none" />
+                      {isTypingShowTitle ? "Select from Studio" : "Type Manually"}
+                    </button>
+                  </div>
+                  
+                  <div className="flex bg-[#1a1c26] border border-white/5 rounded-xl p-4 text-white outline-none focus-within:border-accent transition-all font-bold group">
+                    {isTypingShowTitle ? (
+                      <input 
+                        type="text"
+                        className="flex-1 bg-transparent outline-none"
+                        placeholder="Enter show title..."
+                        value={editingShow.show}
+                        onChange={e => {
+                          const title = e.target.value;
+                          const { duration, sessionId } = getDerivedDataForShow(title);
+                          setEditingShow({...editingShow, show: title, duration, sessionId});
+                        }}
+                      />
+                    ) : (
+                      <select 
+                        className="flex-1 bg-transparent outline-none appearance-none" 
+                        value={editingShow.show} 
+                        onChange={e => {
+                          const title = e.target.value;
+                          const { duration, sessionId } = getDerivedDataForShow(title);
+                          setEditingShow({...editingShow, show: title, duration, sessionId});
+                        }}
+                      >
+                        <option value="" disabled>Select a Show from Studio...</option>
+                        {editingShow.show && !studioSessions.some(s => s.title === editingShow.show) && (
+                          <option value={editingShow.show}>{editingShow.show} (Custom)</option>
+                        )}
+                        {studioSessions.map((session) => (
+                          <option key={session.id} value={session.title}>{session.title}</option>
+                        ))}
+                      </select>
+                    )}
+                    {!isTypingShowTitle && <ChevronDown size={16} className="text-text-secondary pointer-events-none self-center" />}
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -862,7 +1061,7 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
                           onChange={e => setEditingShow({...editingShow, followsShowTitle: e.target.value})}
                         >
                           <option value="">Chronological Flow</option>
-                          {allSessionTitles.filter(title => title !== editingShow.show).map(title => (
+                          {availableFollowTitles.filter(title => title !== editingShow.show).map(title => (
                             <option key={title} value={title}>{title}</option>
                           ))}
                         </select>

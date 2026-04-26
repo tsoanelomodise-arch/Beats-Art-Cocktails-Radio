@@ -7,8 +7,11 @@ export interface ScheduleEntry {
   startTime?: number | null; // minutes from midnight, null for auto-follow
   followsShowTitle?: string; // If null/empty, follows the previous entry in list. Otherwise follows this specific show title.
   duration: number; // minutes
+  startTimeSecs?: number; // seconds from midnight
+  durationSecs?: number; // seconds
   daysOfWeek?: number[]; // [0,1,2,3,4,5,6] where 0 is Sunday
   specificDate?: string; // ISO date string for one-off events
+  sessionId?: string; // Reference to specific Studio session ID
 }
 
 export interface MonthlySchedule {
@@ -18,7 +21,7 @@ export interface MonthlySchedule {
   entries: ScheduleEntry[];
 }
 
-export type SegmentType = 'talk' | 'music' | 'ad' | 'jingle' | 'news' | 'interview' | 'documentary' | 'story';
+export type SegmentType = 'talk' | 'music' | 'ad' | 'jingle' | 'news' | 'interview' | 'documentary' | 'story' | 'mix';
 
 export interface AudioTrack {
   id: string;
@@ -37,6 +40,7 @@ export interface ShowSegment {
   audioUrl?: string; // Legacy / single audio fallback
   audioSequence?: AudioTrack[]; // Array for sequential audio upload
   duration?: number; // In seconds
+  thumbnail?: string; // URL or Base64
 }
 
 export interface Session {
@@ -54,5 +58,5 @@ export interface RadioShow {
   createdAt: string;
 }
 
-export type AppView = 'studio' | 'schedule' | 'live';
-export type ScheduleMode = 'calendar' | 'weekly' | 'list';
+export type AppView = 'studio' | 'schedule' | 'live' | 'landing';
+export type ScheduleMode = 'calendar' | 'weekly' | 'list' | 'playlist';

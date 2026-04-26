@@ -15,7 +15,7 @@ export const TIMEZONES = [
 
 export function getStationTimezone(): string {
   if (typeof window !== 'undefined') {
-    const saved = localStorage.getItem('transformation-radio-timezone');
+    const saved = localStorage.getItem('non-club-radio-timezone');
     if (saved) return saved;
     try {
       return Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -28,7 +28,7 @@ export function getStationTimezone(): string {
 
 export function setStationTimezone(tz: string) {
   if (typeof window !== 'undefined') {
-    localStorage.setItem('transformation-radio-timezone', tz);
+    localStorage.setItem('non-club-radio-timezone', tz);
   }
 }
 

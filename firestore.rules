@@ -1,22 +1,79 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Default deny
     match /{document=**} {
       allow read, write: if false;
     }
-    
+
+    // --- Helpers ---
     function isSignedIn() {
-      return request.auth != null && request.auth.token.email_verified == true;
+      return request.auth != null;
     }
     
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
     function isAdmin() {
-      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      return isEmailVerified() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
-    
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Collections ---
+
+    // Publicly readable connection test
+    match /test/connection {
+      allow read: if true;
+    }
+
     match /admins/{userId} {
       allow read: if isSignedIn() && request.auth.uid == userId;
-      // Admins are created out-of-band via Firebase console or custom scripts. No writes permitted from client.
-      allow write: if false;
+      allow write: if false; // System managed
+    }
+
+    match /drafts/{draftId} {
+      allow read: if true; // Public can read programming info
+      allow write: if isAdmin() && isValidId(draftId);
+    }
+
+    match /schedules/{scheduleId} {
+      allow read: if true; // Public can see the schedule
+      allow write: if isAdmin() && isValidId(scheduleId);
+    }
+
+    function isValidPublicEvent(data) {
+      return data.id is string 
+        && data.title is string && data.title.size() <= 200
+        && data.location is string && data.location.size() <= 200
+        && data.date is string && data.date.size() <= 100
+        && data.icon is string && data.icon.size() <= 50
+        && data.badge in ['Available', 'Limited', 'Sold Out', 'Recent']
+        && data.isRecent is bool
+        && data.thumbnailUrl is string && data.thumbnailUrl.size() <= 1000
+        && data.order is number
+        && data.keys().hasAll(['id', 'title', 'location', 'date', 'icon', 'badge', 'isRecent', 'thumbnailUrl', 'order'])
+        && data.keys().size() == 9;
+    }
+
+    match /events/{eventId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidId(eventId) && isValidPublicEvent(incoming());
+      allow update: if isAdmin() && isValidId(eventId) && isValidPublicEvent(incoming())
+        && incoming().id == existing().id;
+      allow delete: if isAdmin();
     }
   }
 }
