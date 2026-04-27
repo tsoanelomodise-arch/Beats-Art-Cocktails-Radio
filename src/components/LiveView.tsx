@@ -13,6 +13,11 @@ export default function LiveView({ tz = 'UTC' }: { tz?: string }) {
 
   const progressPercent = (trackProgress / currentDuration) * 100;
   const isActualLive = activeShowName !== "No Active Broadcast" && !isStudioMode;
+  
+  const hasAudio = React.useMemo(() => {
+    if (!activeSession) return true;
+    return activeSession.segments.some(seg => (seg.audioSequence || []).length > 0);
+  }, [activeSession]);
 
   const currentSecs = getSecondsFromMidnight(currentTime);
   const nextEvent = todaysSchedule.find(entry => (entry.startTimeSecs || (entry.startTime * 60)) > currentSecs);
@@ -101,7 +106,7 @@ export default function LiveView({ tz = 'UTC' }: { tz?: string }) {
              <div className={`absolute inset-0 blur-3xl transition-all duration-1000 ${isPlaying ? 'bg-accent/20' : 'bg-white/5'} scale-110`} />
              <button 
                onClick={togglePlayPause}
-               disabled={!activeSession}
+               disabled={!activeSession || (!hasAudio && isActualLive)}
                className={`relative w-32 h-32 md:w-48 md:h-48 border flex items-center justify-center transition-all active:scale-95 disabled:opacity-20
                   ${isPlaying ? 'bg-accent border-accent text-[#f2e7d5] shadow-[0_0_50px_rgba(168,35,41,0.3)]' : 'bg-transparent border-white/10 text-white hover:border-accent hover:bg-accent/5'}
                `}
@@ -113,7 +118,20 @@ export default function LiveView({ tz = 'UTC' }: { tz?: string }) {
                 )}
              </button>
            </div>
-           {activeSession && !isPlaying && !isStudioMode && (
+           {activeSession && !hasAudio && isActualLive && (
+             <div className="absolute top-full left-1/2 -translate-x-1/2 mt-8 w-72 text-center reveal">
+               <div className="bg-[#5c191c]/20 border border-accent/40 p-4 backdrop-blur-md">
+                  <div className="flex items-center justify-center gap-2 text-accent mb-2">
+                    <VolumeX size={16} />
+                    <span className="text-[10px] font-black uppercase tracking-[0.3em]">Audio_Missing</span>
+                  </div>
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-[#f2e7d5]/60 leading-relaxed">
+                    The scheduled session "{activeSession.title}" contains no audio tracks. Programming cannot be played.
+                  </p>
+               </div>
+             </div>
+           )}
+           {activeSession && hasAudio && !isPlaying && !isStudioMode && (
              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-8 text-[9px] font-black uppercase tracking-[0.4em] text-white/40">
                STATION_LINK_READY
              </div>

@@ -186,10 +186,11 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
   const [isTypingShowTitle, setIsTypingShowTitle] = useState(false);
   const [editingYear, setEditingYear] = useState<number>(() => getCurrentTimeInTimezone(tz).getFullYear());
   const [editingMonth, setEditingMonth] = useState<number>(() => getCurrentTimeInTimezone(tz).getMonth());
-  const [studioSessions, setStudioSessions] = useState<{id: string, title: string, programName?: string}[]>([]);
+  const [studioSessions, setStudioSessions] = useState<{id: string, title: string, programName?: string, hasAudio?: boolean}[]>([]);
   const [fullShowData, setFullShowData] = useState<RadioShow | null>(null);
 
   const openEditModal = (entry: ScheduleEntry) => {
+    setError(null);
     setEditingYear(currentYear);
     setEditingMonth(currentMonthIndex);
     setEditingShow(entry);
@@ -233,10 +234,13 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
         if (parsed?.sessions) {
           setStudioSessions(parsed.sessions.map((s: any) => {
             const programShow = parsed.programShows?.find(ps => ps.id === s.showId);
+            const sessionSegments = s.segmentIds.map((id: string) => parsed.segments.find((seg: any) => seg.id === id)).filter(Boolean);
+            const hasAudio = sessionSegments.some((seg: any) => (seg.audioSequence || []).length > 0);
             return { 
               id: s.id, 
               title: programShow ? `${programShow.title} — ${s.title}` : s.title || 'Untitled Session',
-              programName: programShow?.title
+              programName: programShow?.title,
+              hasAudio
             };
           }));
         }
@@ -372,6 +376,14 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
   };
 
   const handleUpdateShow = (updated: ScheduleEntry) => {
+    // Prevent scheduling studio sessions with no audio
+    const matchedStudioSession = studioSessions.find(s => s.title === updated.show);
+    if (matchedStudioSession && !matchedStudioSession.hasAudio) {
+      setError(`Cannot schedule "${updated.show}": This session contains no audio tracks. Go to Studio to add audio first.`);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
     setSchedules(prev => {
       // 1. Completely remove any existing version of this show (by ID) across ALL months
       // We use map to avoid mutating previous state objects
@@ -693,6 +705,18 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
         </div>
       </div>
 
+      {error && (
+        <div className="mx-10 mt-6 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center justify-between gap-4 animate-in slide-in-from-top duration-300">
+           <div className="flex items-center gap-3">
+              <AlertCircle className="text-red-500" size={18} />
+              <p className="text-[10px] font-black uppercase tracking-widest text-red-200">{error}</p>
+           </div>
+           <button onClick={() => setError(null)} className="p-1 hover:bg-white/5 rounded-full text-white/40 hover:text-white transition-colors">
+              <X size={14} />
+           </button>
+        </div>
+      )}
+
       <div className="flex-1 overflow-hidden relative">
         <AnimatePresence mode="wait">
           {mode === 'calendar' ? (
@@ -982,6 +1006,7 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
                     value={editingShow.show}
                     onChange={e => {
                       const title = e.target.value;
+                      setError(null);
                       const { duration, sessionId } = getDerivedDataForShow(title);
                       setEditingShow({...editingShow, show: title, duration, sessionId});
                     }}
@@ -992,6 +1017,7 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
                     value={editingShow.show} 
                     onChange={e => {
                       const title = e.target.value;
+                      setError(null);
                       const { duration, sessionId } = getDerivedDataForShow(title);
                       setEditingShow({...editingShow, show: title, duration, sessionId});
                     }}
@@ -1001,7 +1027,9 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
                       <option value={editingShow.show} className="bg-[#1e2022] text-white">{editingShow.show} (Custom)</option>
                     )}
                     {studioSessions.map((session) => (
-                      <option key={session.id} value={session.title} className="bg-[#1e2022] text-white">{session.title}</option>
+                      <option key={session.id} value={session.title} className="bg-[#1e2022] text-white">
+                        {session.title} {!session.hasAudio ? '⚠️ (NO AUDIO)' : '✅'}
+                      </option>
                     ))}
                   </select>
                 )}
@@ -1119,6 +1147,13 @@ export default function ScheduleView({ tz = 'UTC' }: { tz?: string }) {
                 <label className="text-[11px] font-black uppercase tracking-widest text-[#8e95ab]">Broadcast Focus</label>
                 <textarea className="w-full h-24 bg-[#1a1c26] border border-white/5 rounded-xl p-4 text-white outline-none focus:border-accent transition-all font-medium resize-none text-sm" value={editingShow.focus} onChange={e => setEditingShow({...editingShow, focus: e.target.value})} />
               </div>
+
+              {error && (
+                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3">
+                  <AlertCircle className="text-red-500" size={14} />
+                  <p className="text-[10px] font-black uppercase tracking-widest text-red-200">{error}</p>
+                </div>
+              )}
 
               <div className="flex items-center gap-4 pt-4">
                 <button onClick={() => handleUpdateShow(editingShow)} className="flex-1 py-5 bg-accent text-white font-black rounded-2xl uppercase tracking-widest text-xs shadow-xl shadow-accent/20 hover:scale-[1.02] transition-all">Confirm Programming</button>
