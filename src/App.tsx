@@ -8,9 +8,10 @@ import LiveView from './components/LiveView';
 import LandingPage from './components/LandingPage';
 import GlobalPlayer from './components/GlobalPlayer';
 import { RadioProvider } from './lib/RadioContext';
-import { auth, loginWithGoogle, logout } from './lib/firebase';
+import { auth, loginWithGoogle, logout, loginWithEmail, registerWithEmail } from './lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { getStationTimezone, setStationTimezone, TIMEZONES } from './lib/timezone';
+import { Mail, Lock, User as UserIcon, ArrowRight, Github } from 'lucide-react';
 
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -20,6 +21,13 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [tz, setTz] = useState(getStationTimezone());
   const [showLogin, setShowLogin] = useState(false);
+  
+  // Email Auth State
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -38,6 +46,44 @@ export default function App() {
     const newTz = e.target.value;
     setStationTimezone(newTz);
     setTz(newTz);
+  };
+
+  const handleEmailAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    setIsAuthenticating(true);
+    try {
+      if (authMode === 'login') {
+        await loginWithEmail(email, password);
+      } else {
+        await registerWithEmail(email, password);
+      }
+    } catch (err: any) {
+      console.error("Auth error:", err);
+      if (err.code === 'auth/operation-not-allowed') {
+        setAuthError("Email/Password provider is not enabled in Firebase Console. Please enable it in Authentication > Sign-in method.");
+      } else if (err.code === 'auth/popup-blocked') {
+        setAuthError("Popup was blocked by your browser. Please allow popups or open the app in a new tab.");
+      } else {
+        setAuthError(err.message || "An authentication error occurred.");
+      }
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setAuthError(null);
+    try {
+      await loginWithGoogle();
+    } catch (err: any) {
+      console.error("Google auth error:", err);
+      if (err.code === 'auth/popup-blocked' || err.code === 'auth/cancelled-popup-request') {
+        setAuthError("The authentication popup was blocked or closed. Try opening the app in a new tab if this persists on Edge/Safari.");
+      } else {
+        setAuthError("Authentication failed. Please check your browser's third-party cookie settings.");
+      }
+    }
   };
 
   if (authLoading) {
@@ -96,37 +142,121 @@ export default function App() {
   // LOGIN INTERFACE
   if (showLogin && !user) {
     return (
-      <div className="h-screen bg-bg text-white font-sans flex flex-col items-center justify-center relative overflow-hidden">
-        {/* Background elements */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-accent/5 rounded-full blur-[120px] pointer-events-none" />
-        
-        <div className="z-10 flex flex-col items-center text-center max-w-md p-10 bg-[#2a2d30]/30 backdrop-blur-xl border border-white/10 rounded-[40px] shadow-2xl">
-          <div className="mb-8">
-            <Logo className="w-24 h-24" />
-          </div>
-          
-          <h1 className="text-3xl font-[900] tracking-[-1.5px] uppercase text-[#f2e7d5] mb-2">
-            Non-Club Radio Access
-          </h1>
-          <p className="text-[#888a8c] text-sm mb-10 leading-relaxed uppercase tracking-widest">
-            Welcome to the Non-Club Radio master control system. You must authenticate to manage programming, studios, and schedules.
-          </p>
-          
-          <div className="w-full flex flex-col gap-3">
-            <button 
-              onClick={loginWithGoogle}
-              className="w-full py-5 bg-[#f2e7d5] text-black hover:bg-white transition-all rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-3 active:scale-95 shadow-xl shadow-black/20"
-            >
-              Authenticate via Google
-            </button>
-            <button 
-              onClick={() => setShowLogin(false)}
-              className="text-[10px] font-black uppercase tracking-widest text-text-secondary hover:text-white mt-4"
-            >
-              Back to Website
-            </button>
-          </div>
+      <div className="min-h-screen bg-[#121212] text-white font-sans flex flex-col items-center justify-center relative overflow-hidden py-12 px-4">
+        {/* Abstract background effects */}
+        <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
+          <div className="absolute top-1/4 -left-1/4 w-[500px] h-[500px] bg-accent/20 rounded-full blur-[100px] animate-pulse" />
+          <div className="absolute bottom-1/4 -right-1/4 w-[500px] h-[500px] bg-accent/10 rounded-full blur-[100px] animate-pulse delay-700" />
         </div>
+        
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="z-10 w-full max-w-md"
+        >
+          <div className="flex flex-col items-center text-center mb-8">
+            <div className="mb-6 p-4 bg-white/5 rounded-3xl border border-white/10 shadow-2xl">
+              <Logo className="w-16 h-16" />
+            </div>
+            <h1 className="text-3xl font-[950] tracking-[-1px] uppercase text-[#f2e7d5] mb-2">
+              Station Access
+            </h1>
+            <p className="text-[#888a8c] text-[10px] font-black uppercase tracking-[3px]">
+              Non-Club Radio Collective
+            </p>
+          </div>
+
+          <div className="bg-[#1e2022] border border-white/5 rounded-[32px] p-8 shadow-2xl relative overflow-hidden backdrop-blur-sm">
+            {/* Mode Switcher */}
+            <div className="flex bg-black/20 p-1 rounded-2xl mb-8 border border-white/5">
+              <button 
+                onClick={() => { setAuthMode('login'); setAuthError(null); }}
+                className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all ${authMode === 'login' ? 'bg-[#f2e7d5] text-black shadow-lg' : 'text-[#888a8c] hover:text-white'}`}
+              >
+                Login
+              </button>
+              <button 
+                onClick={() => { setAuthMode('register'); setAuthError(null); }}
+                className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all ${authMode === 'register' ? 'bg-[#f2e7d5] text-black shadow-lg' : 'text-[#888a8c] hover:text-white'}`}
+              >
+                Register
+              </button>
+            </div>
+
+            <form onSubmit={handleEmailAuth} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[9px] font-black uppercase tracking-widest text-[#888a8c] ml-1">Email Address</label>
+                <div className="relative">
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={16} />
+                  <input 
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="operator@non-club.radio"
+                    className="w-full bg-black/40 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-sm font-medium focus:border-accent/50 outline-none transition-all placeholder:text-white/10"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[9px] font-black uppercase tracking-widest text-[#888a8c] ml-1">Secure Password</label>
+                <div className="relative">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={16} />
+                  <input 
+                    type="password"
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full bg-black/40 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-sm font-medium focus:border-accent/50 outline-none transition-all placeholder:text-white/10"
+                  />
+                </div>
+              </div>
+
+              {authError && (
+                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-[10px] font-bold text-red-400 uppercase tracking-widest">
+                  {authError}
+                </div>
+              )}
+
+              <button 
+                disabled={isAuthenticating}
+                type="submit"
+                className="w-full py-5 bg-accent text-white hover:bg-accent/80 transition-all rounded-2xl font-black uppercase tracking-[3px] text-[10px] flex items-center justify-center gap-3 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none mt-2 shadow-xl shadow-accent/20"
+              >
+                {isAuthenticating ? 'Processing...' : (authMode === 'login' ? 'Authorize' : 'Join Collective')}
+                {!isAuthenticating && <ArrowRight size={14} />}
+              </button>
+            </form>
+
+            <div className="my-8 flex items-center gap-4 text-[#888a8c]">
+              <div className="h-px flex-1 bg-white/5"></div>
+              <span className="text-[9px] font-black uppercase tracking-widest">OR</span>
+              <div className="h-px flex-1 bg-white/5"></div>
+            </div>
+
+            <button 
+              onClick={handleGoogleLogin}
+              className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 text-white transition-all rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-3 active:scale-[0.98]"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24">
+                <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+              Google Workspace
+            </button>
+          </div>
+          
+          <button 
+            onClick={() => setShowLogin(false)}
+            className="w-full text-center text-[10px] font-black uppercase tracking-widest text-[#888a8c] hover:text-white mt-8 transition-colors"
+          >
+            Back to Broadcast
+          </button>
+        </motion.div>
       </div>
     );
   }
