@@ -50,6 +50,9 @@ const STORAGE_KEY = 'non-club-radio-draft';
 
 import { saveAudioFile, getAudioFile } from '../lib/storage';
 
+import { storage } from '../lib/firebase';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+
 export default function ShowBuilder() {
   const [show, setShow] = useState<RadioShow>({
     id: '1',
@@ -89,6 +92,8 @@ export default function ShowBuilder() {
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'idle'>('idle');
   const [lastSaved, setLastSaved] = useState<string | null>(null);
   const [isExportingAudio, setIsExportingAudio] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
   const hasLoadedRef = useRef(false);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -136,7 +141,7 @@ export default function ShowBuilder() {
         
         setLastSaved(new Date().toLocaleTimeString());
 
-        // Revive dead Blob URLs from IndexedDB
+        // Revive dead Blob URLs from IndexedDB (preserved for legacy compatibility)
         const reviveBlobs = async () => {
           const updatedSegments = await Promise.all(parsed.segments.map(async (segment: ShowSegment) => {
             if (segment.audioSequence && segment.audioSequence.length > 0) {
@@ -153,6 +158,7 @@ export default function ShowBuilder() {
                     return { ...track, url: 'blob-dead:' + track.url };
                   }
                 }
+                // Firebase Storage URLs don't need reviving
                 return track;
               }));
               return { ...segment, audioSequence: newSequence };
@@ -372,35 +378,75 @@ export default function ShowBuilder() {
     });
   };
 
+  const uploadFileToFirebase = (file: File, id: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const storageRef = ref(storage, `audio/${id}_${file.name}`);
+      const uploadTask = uploadBytesResumable(storageRef, file);
+
+      uploadTask.on('state_changed', 
+        (snapshot) => {
+          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+          setUploadProgress(progress);
+        }, 
+        (error) => {
+          console.error("Upload failed", error);
+          reject(error);
+        }, 
+        () => {
+          getDownloadURL(uploadTask.snapshot.ref).then((downloadURL) => {
+            resolve(downloadURL);
+          });
+        }
+      );
+    });
+  };
+
   const handleFileUpload = async (segmentId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
     const files = Array.from(e.target.files) as File[];
     
-    const newTracks: AudioTrack[] = await Promise.all(files.map(async file => {
-      const id = Math.random().toString(36).substr(2, 9);
-      try {
-        await saveAudioFile(id, file);
-      } catch (err) {
-        console.error("Failed to save audio file to IndexedDB", err);
-      }
-      const duration = await getAudioDuration(file);
-      return {
-        id,
-        name: file.name,
-        url: URL.createObjectURL(file), // Create a fresh one for the track object
-        duration
-      };
-    }));
+    setIsUploading(true);
+    setUploadProgress(0);
 
-    const existingSegment = show.segments.find(s => s.id === segmentId);
-    const existingTracks = existingSegment?.audioSequence || [];
-    const mergedTracks = [...existingTracks, ...newTracks];
-    const totalDuration = mergedTracks.reduce((acc, curr) => acc + (curr.duration || 0), 0);
+    try {
+      const newTracks: AudioTrack[] = await Promise.all(files.map(async file => {
+        const id = Math.random().toString(36).substr(2, 9);
+        
+        // Save locally as backup
+        try {
+          await saveAudioFile(id, file);
+        } catch (err) {
+          console.warn("Local cache save failed", err);
+        }
 
-    updateSegment(segmentId, {
-      audioSequence: mergedTracks,
-      duration: Math.ceil(totalDuration)
-    });
+        // Upload to Firebase
+        const cloudUrl = await uploadFileToFirebase(file, id);
+        const duration = await getAudioDuration(file);
+        
+        return {
+          id,
+          name: file.name,
+          url: cloudUrl,
+          duration
+        };
+      }));
+
+      const existingSegment = show.segments.find(s => s.id === segmentId);
+      const existingTracks = existingSegment?.audioSequence || [];
+      const mergedTracks = [...existingTracks, ...newTracks];
+      const totalDuration = mergedTracks.reduce((acc, curr) => acc + (curr.duration || 0), 0);
+
+      updateSegment(segmentId, {
+        audioSequence: mergedTracks,
+        duration: Math.ceil(totalDuration)
+      });
+    } catch (err: any) {
+      console.error("Upload error:", err);
+      setPlaybackError(`Upload failed: ${err.message || 'Check connection or Auth'}`);
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(0);
+    }
   };
 
   const handleThumbnailUpload = async (segmentId: string, e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1159,10 +1205,16 @@ export default function ShowBuilder() {
                               <Plus size={14} />
                               Add to Playlist
                             </button>
-                            <label className="cursor-pointer flex items-center gap-2 px-4 py-2 bg-accent text-[#f2e7d5] hover:bg-white hover:text-black rounded-lg transition-all text-[10px] font-bold uppercase tracking-widest shadow-lg active:scale-95">
-                              <Upload size={14} />
-                              Upload Audio
-                              <input type="file" multiple accept="audio/*" hidden onChange={(e) => handleFileUpload(segment.id, e)} />
+                            <label className={`cursor-pointer flex items-center gap-2 px-4 py-2 ${isUploading ? 'bg-white/10 text-white/40 pointer-events-none' : 'bg-accent text-[#f2e7d5] hover:bg-white hover:text-black'} rounded-lg transition-all text-[10px] font-bold uppercase tracking-widest shadow-lg active:scale-95 relative overflow-hidden`}>
+                              {isUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                              {isUploading ? `Uploading ${Math.round(uploadProgress)}%` : 'Upload Audio'}
+                              {!isUploading && <input type="file" multiple accept="audio/*" hidden onChange={(e) => handleFileUpload(segment.id, e)} />}
+                              {isUploading && (
+                                <div 
+                                  className="absolute bottom-0 left-0 h-1 bg-white/30 transition-all duration-300"
+                                  style={{ width: `${uploadProgress}%` }}
+                                />
+                              )}
                             </label>
                           </div>
                         </div>
@@ -1330,10 +1382,16 @@ export default function ShowBuilder() {
                               <Plus size={12} />
                               Add to Playlist
                             </button>
-                            <label className="cursor-pointer flex items-center gap-2 px-3 py-1.5 bg-accent/10 text-accent hover:bg-accent hover:text-white rounded-lg transition-all text-[9px] font-bold uppercase tracking-widest">
-                              <Upload size={12} />
-                              Upload Audio
-                              <input type="file" multiple accept="audio/*" hidden onChange={(e) => handleFileUpload(segment.id, e)} />
+                            <label className={`cursor-pointer flex items-center gap-2 px-3 py-1.5 ${isUploading ? 'bg-white/10 text-white/40 pointer-events-none' : 'bg-accent/10 text-accent hover:bg-accent hover:text-white'} rounded-lg transition-all text-[9px] font-bold uppercase tracking-widest relative overflow-hidden`}>
+                              {isUploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+                              {isUploading ? `${Math.round(uploadProgress)}%` : 'Upload Audio'}
+                              {!isUploading && <input type="file" multiple accept="audio/*" hidden onChange={(e) => handleFileUpload(segment.id, e)} />}
+                              {isUploading && (
+                                <div 
+                                  className="absolute bottom-0 left-0 h-0.5 bg-accent transition-all duration-300"
+                                  style={{ width: `${uploadProgress}%` }}
+                                />
+                              )}
                             </label>
                           </div>
                         </div>
